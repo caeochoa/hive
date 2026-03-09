@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Hive** is a local-first framework for spinning up purpose-built Telegram bots called **Workers**. The central philosophy is **one folder = one world**: a Worker folder contains all its config, scripts, memory, and logs; Hive provides the shared infrastructure that runs them.
 
 Key docs:
-- `docs/plans/SPEC.md` — original design spec
-- `docs/plans/2026-03-09-hive-architecture-design.md` — resolved architecture decisions
+- `docs/plans/SPEC.md` — evergreen scope document: what Hive is, vocabulary, components, and design decisions
+- `docs/plans/2026-03-09-hive-architecture-design.md` — concrete implementation detail: data flows, config schemas, CLI contract, supervisord setup
 
 ## Development Commands
 

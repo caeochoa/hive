@@ -1,6 +1,6 @@
 # 🐝 Hive
 
-**Project Specification — Draft v0.1**
+**Project Specification — v0.2**
 _Last updated: March 2026_
 
 ---
@@ -47,6 +47,7 @@ hive start ./my-worker
 my-worker/
 ├── .git/                  # All changes tracked
 ├── .venv/                 # Scripts-only venv
+├── .env                   # Secrets (git-ignored)
 ├── hive.toml              # Worker config
 ├── commands/              # Scripts = bot commands = agent tools
 │   ├── summarise.py
@@ -69,61 +70,39 @@ The Worker is not the agent. The Worker is an event loop that runs continuously,
 - Every Worker has a Telegram bot as its primary interface.
 - Users interact via bot commands (e.g. `/summarise`, `/fetch`).
 - Commands map directly to scripts in the `commands/` folder.
-
-> ⚠ Command discovery and registration mechanism to be defined — likely auto-discovered from `commands/` at startup.
-> ⚠ Authentication / access control for the Telegram bot (who can send commands?) to be defined.
+- Commands are auto-discovered from `commands/` at startup and registered with Telegram.
+- Auth is controlled via `TELEGRAM_ALLOWED_USER_ID` in `.env` — only that user ID can interact with the bot.
 
 ### 4.2 Agent
 
-- An LLM agent runs inside each Worker, invoked on demand.
+- An LLM agent runs inside each Worker, invoked on demand for natural language messages.
 - The agent has access to the Worker's folder as its memory and state.
 - The agent's tools are auto-discovered from the `commands/` folder. Each script exposes a metadata block (description, args schema) that the Worker registers at startup.
-- The git repo acts as an audit trail for all agent writes to the folder.
+- `memory/` is the agent's primary read/write state store — free-form files, no structured store required.
+- Hive auto-commits any modified files after each agent turn, so the git repo acts as an audit trail for all agent writes.
+- Agent sessions persist per Telegram chat ID.
 
-**Decision: the agent is powered by the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)** (`pip install claude-agent-sdk`). It runs on the existing Claude Code installation and inherits its authentication — no API key or separate billing required for personal local use. The SDK provides built-in filesystem tools (`Read`, `Write`, `Bash`, `Glob`) and supports a `cwd` parameter to scope the agent to the Worker's folder, which maps directly onto the "one folder = one world" design. Custom tools are registered as in-process MCP servers, which is how `commands/` scripts will be exposed to the agent.
-
-Example invocation:
-
-```python
-from claude_agent_sdk import query, ClaudeAgentOptions
-
-options = ClaudeAgentOptions(
-    system_prompt="You are a worker agent. Your world is this folder.",
-    allowed_tools=["Read", "Write", "Bash", "Glob"],
-    permission_mode="acceptEdits",
-    cwd="/path/to/worker-folder",
-    mcp_servers={"commands": commands_mcp_server},  # auto-discovered from commands/
-)
-
-async for message in query(prompt=task, options=options):
-    ...
-```
-
-> ⚠ Memory strategy: how does the agent read/write to `memory/`? Free-form files, structured store, or both?
-> ⚠ Whether the agent can commit to git itself, or whether commits are always triggered by Hive.
+**Decision: the agent is powered by the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)** (`pip install claude-agent-sdk`). It runs on the existing Claude Code installation and inherits its authentication — no API key or separate billing required for personal local use. The SDK provides built-in filesystem tools (`Read`, `Write`, `Bash`, `Glob`) and supports a `cwd` parameter to scope the agent to the Worker's folder, which maps directly onto the "one folder = one world" design. Custom tools are registered as in-process MCP servers, which is how `commands/` scripts are exposed to the agent.
 
 ### 4.3 Commands
 
 - Scripts in `commands/` serve as both bot commands (user-facing) and agent tools (LLM-facing).
-- Each script exposes a metadata block — name, description, args — used for both Telegram command registration and agent tool schema generation.
+- Each script exposes a metadata block at the top — a structured YAML docstring with name, description, and args — used for both Telegram command registration and agent tool schema generation.
 - Scripts run inside the Worker's `.venv`, allowing per-worker dependencies.
-
-> ⚠ Metadata format to be defined (docstring convention, YAML header, or separate manifest file).
-> ⚠ Stdin/stdout contract between Hive and scripts to be defined.
+- Hive invokes scripts with args as CLI flags; stdout becomes the Telegram reply; non-zero exit is an error with stderr surfaced to the user.
 
 ### 4.4 Scheduler
 
 - Workers support optional scheduled tasks defined in `hive.toml`.
-- Scheduled tasks can invoke either a script (command) or an agent run.
-
-> ⚠ Cron syntax vs interval-based scheduling to be decided.
-> ⚠ How scheduled agent runs are prompted (what message/task is passed to the agent).
+- Scheduled tasks use cron syntax (via the `cron` key in `[[schedule]]` blocks).
+- Scheduled tasks can invoke either a script (via `run`) or an agent run (via `agent_prompt`).
 
 ### 4.5 Comb (Web Dashboard)
 
 - Each Worker can optionally expose a Comb — a lightweight web dashboard.
 - The Comb is config-driven: workers declare which Cells to display in `hive.toml`. No custom code required per Worker.
-- Hive ships a standard set of Cell types.
+- Hive serves all Workers centrally at `localhost:8080/workers/<name>` — local-only, no authentication required.
+- MVP Cell types: `log` (tail of a log file), `file` (markdown or plain text), `metric` (single value from a JSON file by key).
 
 Example `hive.toml` dashboard config:
 
@@ -136,120 +115,56 @@ cells = [
 ]
 ```
 
-> ⚠ Full list of Cell types to be defined. Candidates: log, markdown file, JSON metric, command trigger button, iframe.
-> ⚠ Whether the Comb is served by Hive centrally or by each Worker process.
-> ⚠ Authentication for the Comb (local-only vs password-protected).
-
 ---
 
 ## 5. Process Management
 
 Each Worker runs as a separate OS process. Docker is explicitly out of scope for the initial local version — the isolation benefit does not justify the overhead for a personal tool.
 
-The chosen process manager is **supervisord** — a battle-tested Unix process control system that handles startup, crash recovery, log capture, and a control CLI out of the box. A custom Hive daemon remains a future option if tighter integration is needed, but does not replace supervisord.
+The chosen process manager is **supervisord** — a battle-tested Unix process control system that handles startup, crash recovery, log capture, and a control CLI out of the box.
 
 ### 5.1 supervisord
 
 supervisord runs as a background daemon. Each Worker is registered as a program block in `supervisord.conf`. Hive commands (`hive start`, `hive stop`) write or update these blocks and call `supervisorctl` under the hood, so the user always interacts with Hive rather than supervisord directly.
 
-Example program block for a Worker:
-
-```ini
-[program:worker-finance]
-command=hive run /home/cesar/hive/workers/finance
-directory=/home/cesar/hive/workers/finance
-autostart=true
-autorestart=true
-stdout_logfile=/home/cesar/hive/workers/finance/logs/out.log
-stderr_logfile=/home/cesar/hive/workers/finance/logs/err.log
-```
-
-Key `supervisorctl` commands:
-
-```bash
-supervisorctl status                  # view all workers
-supervisorctl start worker-finance
-supervisorctl stop worker-finance
-supervisorctl restart worker-finance
-supervisorctl tail -f worker-finance  # live logs
-```
-
-- `autostart=true` means the Worker starts automatically when supervisord starts.
 - `autorestart=true` means crashed Workers are automatically restarted.
 - Logs are written to the Worker's own `logs/` folder, keeping everything self-contained.
-
-> ⚠ How `hive init` registers a new Worker with supervisord automatically (write config + `supervisorctl reread` + `supervisorctl update`).
-> ⚠ Whether `hive start` / `hive stop` are thin wrappers over `supervisorctl` or do additional work.
+- `hive init` writes the supervisord block automatically and runs `supervisorctl reread` + `supervisorctl update` to register the Worker.
 
 ### 5.2 Auto-start on Boot — macOS LaunchAgents
 
 To start supervisord automatically on user login, a launchd plist is placed in `~/Library/LaunchAgents/`. This means all Workers with `autostart=true` are running whenever the machine is on and the user is logged in.
 
-Plist file: `~/Library/LaunchAgents/com.hive.supervisord.plist`
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.hive.supervisord</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/path/to/supervisord</string>
-        <string>-c</string>
-        <string>/path/to/supervisord.conf</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-```
-
-Load the plist once after creating it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.hive.supervisord.plist
-```
-
-- LaunchAgents triggers on user login, not at boot. This is intentional — no sudo required, and correct for a personal local tool.
-- LaunchDaemons (boot-time, pre-login) is available but out of scope.
-- `hive init` should optionally install or update the plist as part of first-time setup.
-
-> ⚠ Exact paths for supervisord binary and conf file to be confirmed at setup time.
-> ⚠ Whether `hive init` handles plist installation automatically or documents it as a manual step.
+- LaunchAgents triggers on user login, not at boot — no sudo required, correct for a personal local tool.
+- `hive init` installs the plist automatically on first use.
 
 ---
 
 ## 6. Scaffolding — `hive init`
 
-Running `hive init <name>` (or `hive init` inside an empty folder) should scaffold a new Worker:
+Running `hive init <name>` scaffolds a new Worker:
 
-- Create the standard folder structure.
-- Initialise a git repo.
-- Create a `.venv` with base requirements.
-- Generate a `hive.toml` template.
-- Optionally prompt for Telegram bot token and basic config.
-
-> ⚠ Whether `hive init` also registers and starts the Worker, or if that's a separate step.
-> ⚠ Base `requirements.txt` contents for the scripts venv.
+- Creates the standard folder structure.
+- Initialises a git repo.
+- Creates a `.venv` with base requirements.
+- Generates `hive.toml` and `.env` templates.
+- Writes the supervisord program block and reloads supervisord.
+- Installs the macOS LaunchAgent on first use.
 
 ---
 
 ## 7. Configuration — `hive.toml`
 
-Each Worker is configured via a `hive.toml` file in its root. Sketch of the structure:
+Each Worker is configured via a `hive.toml` file in its root. Secrets (bot token, allowed user ID) live in `.env`, not here — `hive.toml` is safe to commit.
 
 ```toml
 [worker]
 name = "my-worker"
-telegram_token = "..."
 
 [agent]
+model = "claude-haiku-4-5"
 memory_dir = "memory/"
+max_turns = 10
 
 [[schedule]]
 cron = "0 8 * * *"
@@ -265,25 +180,6 @@ cells = [
 ]
 ```
 
-> ⚠ Full `hive.toml` schema to be defined.
-> ⚠ How secrets (API keys, tokens) are handled — env vars, separate secrets file, or system keychain.
-
 ---
 
-## 8. Open Questions
-
-> ⚠ Script metadata format (how commands advertise themselves as tools).
-> ⚠ Stdin/stdout/exit code contract between Hive and scripts.
-> ⚠ How `hive init` registers a new Worker with supervisord (config write + reread + update).
-> ⚠ Whether `hive init` installs the LaunchAgents plist automatically or documents it as a manual step.
-> ⚠ Comb Cell type inventory.
-> ⚠ Comb serving model: centralised vs per-worker.
-> ⚠ Authentication for Telegram bots and Comb dashboard.
-> ⚠ Secrets management strategy.
-> ⚠ Whether the agent can self-commit to git.
-> ⚠ Full `hive.toml` schema.
-> ⚠ Memory structure inside `memory/` — free-form or structured.
-
----
-
-_This document is a living spec. ⚠ items are open questions to be resolved during design._
+_This document describes what Hive is and why it is designed this way. For implementation detail — data flows, config schemas, CLI internals, supervisord setup — see `docs/plans/2026-03-09-hive-architecture-design.md`._
