@@ -1,2 +1,5 @@
+from hive.cli.app import app
+
+
 def main() -> None:
-    print("Hello from hive!")
+    app()
