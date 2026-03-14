@@ -126,6 +126,11 @@ def supervisorctl(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def is_launchagent_installed() -> bool:
+    """Check if the macOS LaunchAgent plist exists."""
+    return LAUNCHAGENT_PLIST.exists()
+
+
 def reload_supervisord() -> None:
     """Signal supervisord to reread and update config."""
     supervisorctl("reread")
