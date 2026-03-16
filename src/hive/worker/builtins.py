@@ -11,10 +11,13 @@ if TYPE_CHECKING:
 BUILTIN_NAMES: set[str] = {"reset", "help"}
 
 
-def make_reset_handler(agent_runner: AgentRunner):
+def make_reset_handler(agent_runner: AgentRunner, allowed_user_id: int):
     """Return a /reset handler that clears the agent session."""
 
     async def handle(update, context) -> None:
+        user = update.effective_user
+        if user is None or user.id != allowed_user_id:
+            return
         chat_id = update.effective_chat.id
         await agent_runner.reset_session(chat_id)
         await update.message.reply_text("Session reset. Starting fresh.")
@@ -22,10 +25,15 @@ def make_reset_handler(agent_runner: AgentRunner):
     return handle
 
 
-def make_help_handler(registry: CommandRegistry, builtin_names: set[str]):
+def make_help_handler(
+    registry: CommandRegistry, builtin_names: set[str], allowed_user_id: int
+):
     """Return a /help handler that lists all available commands."""
 
     async def handle(update, context) -> None:
+        user = update.effective_user
+        if user is None or user.id != allowed_user_id:
+            return
         lines = [
             "*Built-in commands:*",
             "/reset \u2014 Start a fresh conversation",
