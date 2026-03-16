@@ -119,6 +119,10 @@ class CommandRegistry:
         async def callback(
             update: Update, context: ContextTypes.DEFAULT_TYPE
         ) -> None:
+            user = update.effective_user
+            if user is None or user.id != self._config.telegram_allowed_user_id:
+                return
+
             # Parse positional args from context.args
             args: dict[str, str | int | float | bool] = {}
             telegram_args = context.args or []

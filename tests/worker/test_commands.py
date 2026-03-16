@@ -219,6 +219,44 @@ class TestTelegramHandlers:
         handlers = registry.telegram_handlers()
         assert handlers == []
 
+    @pytest.mark.asyncio
+    async def test_handler_ignores_disallowed_user(self, registry: CommandRegistry) -> None:
+        registry.discover()
+        handlers = registry.telegram_handlers()
+        handler = handlers[0]
+
+        update = MagicMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 99999  # not 12345
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.args = []
+
+        callback = handler.callback
+        await callback(update, context)
+
+        update.message.reply_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_handler_allows_correct_user(self, registry: CommandRegistry) -> None:
+        registry.discover()
+        handlers = registry.telegram_handlers()
+        handler = handlers[0]
+
+        update = MagicMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 12345  # matches config fixture
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.args = []
+
+        with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "hello"
+            callback = handler.callback
+            await callback(update, context)
+
+        update.message.reply_text.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # build_mcp_server
