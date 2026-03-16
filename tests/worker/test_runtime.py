@@ -32,6 +32,28 @@ def _make_runtime(tmp_path: Path) -> WorkerRuntime:
 
 
 # ------------------------------------------------------------------ #
+# Scheduler lifecycle
+# ------------------------------------------------------------------ #
+
+
+class TestSchedulerLifecycle:
+    async def test_start_does_not_await_scheduler(self, tmp_path):
+        """Scheduler.start/stop must be callable without await from runtime."""
+        from unittest.mock import MagicMock
+        from hive.worker.scheduler import WorkerScheduler
+        import inspect
+
+        sched = MagicMock(spec=WorkerScheduler)
+        sched.start = MagicMock(return_value=None)
+        sched.stop = MagicMock(return_value=None)
+
+        result = sched.start()
+        assert result is None
+
+        assert not inspect.isawaitable(sched.start())
+
+
+# ------------------------------------------------------------------ #
 # _is_allowed
 # ------------------------------------------------------------------ #
 

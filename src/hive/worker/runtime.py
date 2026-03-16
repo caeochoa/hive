@@ -98,12 +98,12 @@ class WorkerRuntime:
             self._config.telegram_allowed_user_id,
             self._auto_commit,
         )
-        await self._scheduler.start()
+        self._scheduler.start()
 
     async def stop(self) -> None:
         """Graceful shutdown: scheduler -> agent -> telegram."""
         if self._scheduler:
-            await self._scheduler.stop()
+            self._scheduler.stop()
         if self._agent:
             await self._agent.close()
         if self._app:
@@ -129,8 +129,8 @@ class WorkerRuntime:
     def _register_handlers(self) -> None:
         """Register handlers: built-ins first, user commands, then catch-all NL handler."""
         # Built-in handlers
-        reset_handler = make_reset_handler(self._agent)
-        help_handler = make_help_handler(self._registry, BUILTIN_NAMES)
+        reset_handler = make_reset_handler(self._agent, self._config.telegram_allowed_user_id)
+        help_handler = make_help_handler(self._registry, BUILTIN_NAMES, self._config.telegram_allowed_user_id)
         self._app.add_handler(CommandHandler("reset", reset_handler))
         self._app.add_handler(CommandHandler("help", help_handler))
 
