@@ -22,13 +22,26 @@ document.querySelectorAll('.cell').forEach((el, i) => {
     const src = new EventSource(`/workers/{{ name }}/cells/${i}/stream`);
     src.onmessage = e => { pre.textContent += e.data + '\n'; pre.scrollTop = pre.scrollHeight; };
   } else {
+    function renderCell(content) {
+      contentDiv.replaceChildren();
+      if (cellType === 'file') {
+        const pre = document.createElement('pre');
+        pre.textContent = content;
+        contentDiv.appendChild(pre);
+      } else {
+        const p = document.createElement('p');
+        p.style.cssText = 'font-size:2rem;font-weight:bold';
+        p.textContent = content;
+        contentDiv.appendChild(p);
+      }
+    }
     fetch(`/workers/{{ name }}/cells/${i}`)
       .then(r => r.json())
-      .then(d => { contentDiv.innerHTML = cellType === 'file' ? '<pre>' + d.content + '</pre>' : '<p style="font-size:2rem;font-weight:bold">' + d.content + '</p>'; });
+      .then(d => renderCell(d.content));
     setInterval(() => {
       fetch(`/workers/{{ name }}/cells/${i}`)
         .then(r => r.json())
-        .then(d => { contentDiv.innerHTML = cellType === 'file' ? '<pre>' + d.content + '</pre>' : '<p style="font-size:2rem;font-weight:bold">' + d.content + '</p>'; });
+        .then(d => renderCell(d.content));
     }, 10000);
   }
 });

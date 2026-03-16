@@ -143,6 +143,9 @@ class CommandRegistry:
 
     def build_mcp_server(self) -> Any:
         """Stub — returns None until SDK API is confirmed."""
+        logger.warning(
+            "build_mcp_server() is not yet implemented: commands will not be available as agent tools"
+        )
         return None
 
 
