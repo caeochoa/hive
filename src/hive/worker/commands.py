@@ -141,12 +141,62 @@ class CommandRegistry:
 
         return CommandHandler(meta.name, callback)
 
+    def _build_input_schema(self, meta: CommandMeta) -> dict[str, Any]:
+        """Build a JSON Schema dict from a CommandMeta's args."""
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for arg in meta.args:
+            type_map = {"int": "integer", "float": "number", "bool": "boolean"}
+            prop: dict[str, Any] = {"type": type_map.get(arg.type, "string")}
+            prop["description"] = arg.description
+            properties[arg.name] = prop
+            if arg.required:
+                required.append(arg.name)
+        schema: dict[str, Any] = {"type": "object", "properties": properties}
+        if required:
+            schema["required"] = required
+        return schema
+
     def build_mcp_server(self) -> Any:
-        """Stub — returns None until SDK API is confirmed."""
-        logger.warning(
-            "build_mcp_server() is not yet implemented: commands will not be available as agent tools"
-        )
-        return None
+        """Build an in-process MCP server exposing all discovered commands as tools."""
+        if not self._commands:
+            return None
+
+        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
+
+        tools: list[Any] = []
+        for meta in self._commands.values():
+            input_schema = self._build_input_schema(meta)
+
+            async def handler(
+                args: dict[str, Any], meta: CommandMeta = meta
+            ) -> dict[str, Any]:
+                # Fill in defaults for optional args not provided
+                filled: dict[str, str | int | float | bool] = {}
+                for arg_def in meta.args:
+                    if arg_def.name in args:
+                        filled[arg_def.name] = args[arg_def.name]
+                    elif arg_def.default is not None:
+                        filled[arg_def.name] = arg_def.default
+                try:
+                    result = await self.execute(meta, filled)
+                    return {"content": [{"type": "text", "text": result}]}
+                except CommandError as exc:
+                    return {
+                        "content": [{"type": "text", "text": f"Error: {exc.stderr}"}],
+                        "is_error": True,
+                    }
+
+            tools.append(
+                SdkMcpTool(
+                    name=meta.name,
+                    description=meta.description,
+                    input_schema=input_schema,
+                    handler=handler,
+                )
+            )
+
+        return create_sdk_mcp_server("commands", tools=tools)
 
 
 def _cast_arg(value: str, type_name: str) -> str | int | float | bool:

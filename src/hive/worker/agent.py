@@ -34,11 +34,13 @@ class ClaudeAgentRunner(AgentRunner):
         self,
         config: Any,
         commands_mcp: Any,
+        command_names: list[str],
         sessions_file: Path,
         worker_dir: Path,
     ) -> None:
         self._config = config
         self._commands_mcp = commands_mcp
+        self._command_names = command_names
         self._sessions_file = sessions_file
         self._worker_dir = worker_dir
 
@@ -107,10 +109,10 @@ class ClaudeAgentRunner(AgentRunner):
                     "system_prompt",
                     "You are a worker agent. Your world is this folder.",
                 ),
-                allowed_tools=["Read", "Write", "Bash", "Glob"],
+                allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
                 permission_mode="acceptEdits",
                 cwd=str(self._worker_dir),
-                mcp_servers={"commands": self._commands_mcp},
+                mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
                 model=self._config.model,
                 max_turns=self._config.max_turns,
             )
