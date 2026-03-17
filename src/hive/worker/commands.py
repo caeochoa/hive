@@ -1,0 +1,162 @@
+"""Command discovery, parsing, and execution for Worker scripts."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+from telegram import Update
+from telegram.ext import CommandHandler, ContextTypes
+
+from hive.shared.config import WorkerConfig
+from hive.shared.models import CommandArg, CommandMeta
+
+logger = logging.getLogger(__name__)
+
+_DOCSTRING_RE = re.compile(r'^"""(.*?)"""', re.DOTALL)
+
+
+class CommandError(Exception):
+    """Raised when a command script exits with a non-zero status."""
+
+    def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
+        super().__init__(stderr)
+
+
+class CommandRegistry:
+    """Discovers, parses, and executes command scripts in a Worker folder."""
+
+    def __init__(self, config: WorkerConfig) -> None:
+        self._config = config
+        self._commands: dict[str, CommandMeta] = {}
+
+    @property
+    def commands(self) -> dict[str, CommandMeta]:
+        return dict(self._commands)
+
+    def discover(self) -> None:
+        """Glob commands/*.py under worker_dir, parse docstrings, skip invalid."""
+        commands_dir = self._config.worker_dir / "commands"
+        if not commands_dir.is_dir():
+            logger.warning("No commands/ directory in %s", self._config.worker_dir)
+            return
+
+        self._commands.clear()
+        for path in sorted(commands_dir.glob("*.py")):
+            try:
+                meta = self._parse_script(path)
+                self._commands[meta.name] = meta
+            except (ValueError, yaml.YAMLError) as exc:
+                logger.warning("Skipping invalid command script %s: %s", path, exc)
+
+    def _parse_script(self, path: Path) -> CommandMeta:
+        """Extract and parse the YAML docstring from a command script."""
+        source = path.read_text(encoding="utf-8")
+        match = _DOCSTRING_RE.search(source)
+        if not match:
+            raise ValueError(f"No docstring found in {path}")
+
+        raw = yaml.safe_load(match.group(1))
+        if not isinstance(raw, dict):
+            raise ValueError(f"Docstring in {path} is not a YAML mapping")
+        if "name" not in raw:
+            raise ValueError(f"Missing 'name' in docstring of {path}")
+        if "description" not in raw:
+            raise ValueError(f"Missing 'description' in docstring of {path}")
+
+        args_raw = raw.get("args", [])
+        args = [CommandArg(**a) for a in args_raw]
+
+        return CommandMeta(
+            name=raw["name"],
+            description=raw["description"],
+            script_path=str(path.resolve()),
+            args=args,
+        )
+
+    async def execute(
+        self, meta: CommandMeta, args: dict[str, str | int | float | bool]
+    ) -> str:
+        """Run a command script as a subprocess and return its stdout."""
+        venv_python = self._config.worker_dir / ".venv" / "bin" / "python"
+
+        cmd_args: list[str] = [str(venv_python), meta.script_path]
+        for key, value in args.items():
+            cmd_args.extend([f"--{key}", str(value)])
+
+        env = {**os.environ, "WORKER_DIR": str(self._config.worker_dir)}
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise CommandError(stderr.decode("utf-8", errors="replace"))
+
+        return stdout.decode("utf-8", errors="replace")
+
+    def telegram_handlers(self) -> list[CommandHandler]:
+        """Build a Telegram CommandHandler for each discovered command."""
+        handlers: list[CommandHandler] = []
+        for meta in self._commands.values():
+            handler = self._make_handler(meta)
+            handlers.append(handler)
+        return handlers
+
+    def _make_handler(self, meta: CommandMeta) -> CommandHandler:
+        """Create a single Telegram CommandHandler for a CommandMeta."""
+
+        async def callback(
+            update: Update, context: ContextTypes.DEFAULT_TYPE
+        ) -> None:
+            user = update.effective_user
+            if user is None or user.id != self._config.telegram_allowed_user_id:
+                return
+
+            # Parse positional args from context.args
+            args: dict[str, str | int | float | bool] = {}
+            telegram_args = context.args or []
+            for i, arg_def in enumerate(meta.args):
+                if i < len(telegram_args):
+                    args[arg_def.name] = _cast_arg(telegram_args[i], arg_def.type)
+                elif arg_def.default is not None:
+                    args[arg_def.name] = arg_def.default
+                # If required and not provided, skip — script will error
+
+            try:
+                result = await self.execute(meta, args)
+                await update.message.reply_text(result or "(no output)")  # type: ignore[union-attr]
+            except CommandError as exc:
+                await update.message.reply_text(f"Error: {exc.stderr}")  # type: ignore[union-attr]
+
+        return CommandHandler(meta.name, callback)
+
+    def build_mcp_server(self) -> Any:
+        """Stub — returns None until SDK API is confirmed."""
+        logger.warning(
+            "build_mcp_server() is not yet implemented: commands will not be available as agent tools"
+        )
+        return None
+
+
+def _cast_arg(value: str, type_name: str) -> str | int | float | bool:
+    """Cast a string argument to the declared type."""
+    match type_name:
+        case "int":
+            return int(value)
+        case "float":
+            return float(value)
+        case "bool":
+            return value.lower() in ("true", "1", "yes")
+        case _:
+            return value

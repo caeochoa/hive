@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><title>{{ name }} — Hive Comb</title>
+<style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem}
+.cell{border:1px solid #d1d5db;border-radius:8px;padding:1rem;margin:1rem 0}
+.cell h3{margin:0 0 0.5rem}
+pre{background:#f3f4f6;padding:0.5rem;overflow-x:auto;max-height:400px;overflow-y:auto}
+</style></head><body>
+<h1><a href="/">←</a> {{ name }}</h1>
+{% for cell in cells %}
+<div class="cell" id="cell-{{ loop.index0 }}">
+<h3>{{ cell.title }}</h3>
+<div class="cell-content">Loading...</div>
+</div>
+{% endfor %}
+<script>
+document.querySelectorAll('.cell').forEach((el, i) => {
+  const cellType = {{ cell_types | tojson }}[i];
+  const contentDiv = el.querySelector('.cell-content');
+  if (cellType === 'log') {
+    const pre = document.createElement('pre');
+    contentDiv.replaceWith(pre);
+    const src = new EventSource(`/workers/{{ name }}/cells/${i}/stream`);
+    src.onmessage = e => { pre.textContent += e.data + '\n'; pre.scrollTop = pre.scrollHeight; };
+  } else {
+    function renderCell(content) {
+      contentDiv.replaceChildren();
+      if (cellType === 'file') {
+        const pre = document.createElement('pre');
+        pre.textContent = content;
+        contentDiv.appendChild(pre);
+      } else {
+        const p = document.createElement('p');
+        p.style.cssText = 'font-size:2rem;font-weight:bold';
+        p.textContent = content;
+        contentDiv.appendChild(p);
+      }
+    }
+    fetch(`/workers/{{ name }}/cells/${i}`)
+      .then(r => r.json())
+      .then(d => renderCell(d.content));
+    setInterval(() => {
+      fetch(`/workers/{{ name }}/cells/${i}`)
+        .then(r => r.json())
+        .then(d => renderCell(d.content));
+    }, 10000);
+  }
+});
+</script>
+</body></html>

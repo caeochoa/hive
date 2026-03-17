@@ -1,0 +1,17 @@
+[worker]
+name = "budget"
+
+[agent]
+model = "claude-haiku-4-5"
+memory_dir = "memory/"
+max_turns = 10
+
+[[schedule]]
+cron = "0 8 * * *"
+run = "commands/morning.py"
+
+[comb]
+cells = [
+  { type = "log", title = "Activity", source = "logs/worker.log" },
+  { type = "metric", title = "Tasks", source = "memory/stats.json", key = "tasks_today" },
+]
