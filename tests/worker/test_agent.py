@@ -51,6 +51,7 @@ def runner(agent_config, commands_mcp, sessions_file, worker_dir):
     return ClaudeAgentRunner(
         config=agent_config,
         commands_mcp=commands_mcp,
+        command_names=[],
         sessions_file=sessions_file,
         worker_dir=worker_dir,
     )
@@ -85,6 +86,7 @@ def test_load_sessions_from_file(agent_config, commands_mcp, worker_dir, tmp_pat
     r = ClaudeAgentRunner(
         config=agent_config,
         commands_mcp=commands_mcp,
+        command_names=[],
         sessions_file=sf,
         worker_dir=worker_dir,
     )
@@ -99,6 +101,7 @@ def test_load_sessions_corrupt_file(agent_config, commands_mcp, worker_dir, tmp_
     r = ClaudeAgentRunner(
         config=agent_config,
         commands_mcp=commands_mcp,
+        command_names=[],
         sessions_file=sf,
         worker_dir=worker_dir,
     )

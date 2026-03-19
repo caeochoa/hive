@@ -64,6 +64,7 @@ class WorkerRuntime:
         """
         self._registry.discover()
         commands_mcp = self._registry.build_mcp_server()
+        command_names = list(self._registry._commands) if commands_mcp is not None else []
 
         agent_config = SimpleNamespace(
             model=self._config.agent_model,
@@ -76,7 +77,7 @@ class WorkerRuntime:
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"
         )
         self._agent = ClaudeAgentRunner(
-            agent_config, commands_mcp, sessions_file, self._config.worker_dir
+            agent_config, commands_mcp, command_names, sessions_file, self._config.worker_dir
         )
 
         self._app = ApplicationBuilder().token(self._config.telegram_bot_token).build()

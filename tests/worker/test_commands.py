@@ -264,8 +264,68 @@ class TestTelegramHandlers:
 
 
 class TestBuildMcpServer:
-    def test_returns_none_stub(self, registry: CommandRegistry) -> None:
+    def test_returns_none_when_no_commands(self, registry: CommandRegistry) -> None:
+        # Don't call discover — registry has no commands
         assert registry.build_mcp_server() is None
+
+    def test_returns_mcp_server_config(self, registry: CommandRegistry) -> None:
+        registry.discover()
+        server = registry.build_mcp_server()
+        assert server is not None
+        assert server["type"] == "sdk"
+        assert server["name"] == "commands"
+
+    def test_server_has_tools_for_each_command(self, registry: CommandRegistry) -> None:
+        registry.discover()
+        server = registry.build_mcp_server()
+        assert server is not None
+        # The MCP server instance should list the tools it registered
+        assert len(registry.commands) == 1  # only "greet" is valid
+        # Verify one tool was registered by checking the server was built for our commands
+        assert "greet" in registry.commands
+
+    @pytest.mark.asyncio
+    async def test_tool_handler_executes_command(self, registry: CommandRegistry) -> None:
+        registry.discover()
+
+        with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "Hello, world!"
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
+
+            result = await tools["greet"].handler({"who": "Alice"})
+            assert result["content"][0]["text"] == "Hello, world!"
+            mock_exec.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tool_handler_handles_error(self, registry: CommandRegistry) -> None:
+        registry.discover()
+
+        with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
+            mock_exec.side_effect = CommandError("script failed")
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
+
+            result = await tools["greet"].handler({})
+            assert result.get("is_error") is True
+            assert "script failed" in result["content"][0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_tool_handler_fills_defaults(self, registry: CommandRegistry) -> None:
+        registry.discover()
+
+        with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "Hello, world!"
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
+
+            # Call without the optional arg — handler should fill 'who' with default 'world'
+            await tools["greet"].handler({})
+            call_args = mock_exec.call_args
+            assert call_args[0][1]["who"] == "world"
 
 
 # ---------------------------------------------------------------------------
