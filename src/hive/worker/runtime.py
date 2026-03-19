@@ -64,7 +64,7 @@ class WorkerRuntime:
         """
         self._registry.discover()
         commands_mcp = self._registry.build_mcp_server()
-        command_names = list(self._registry.commands.keys()) if commands_mcp is not None else []
+        command_names = list(self._registry._commands) if commands_mcp is not None else []
 
         agent_config = SimpleNamespace(
             model=self._config.agent_model,

@@ -141,7 +141,7 @@ class CommandRegistry:
 
         return CommandHandler(meta.name, callback)
 
-    def _build_input_schema(self, meta: CommandMeta) -> dict[str, Any]:
+    def build_input_schema(self, meta: CommandMeta) -> dict[str, Any]:
         """Build a JSON Schema dict from a CommandMeta's args."""
         properties: dict[str, Any] = {}
         required: list[str] = []
@@ -157,16 +157,16 @@ class CommandRegistry:
             schema["required"] = required
         return schema
 
-    def build_mcp_server(self) -> Any:
-        """Build an in-process MCP server exposing all discovered commands as tools."""
+    def build_mcp_tools(self) -> list[Any] | None:
+        """Build the list of MCP tools for all discovered commands."""
         if not self._commands:
             return None
 
-        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
+        from claude_agent_sdk import SdkMcpTool
 
         tools: list[Any] = []
         for meta in self._commands.values():
-            input_schema = self._build_input_schema(meta)
+            input_schema = self.build_input_schema(meta)
 
             async def handler(
                 args: dict[str, Any], meta: CommandMeta = meta
@@ -195,6 +195,16 @@ class CommandRegistry:
                     handler=handler,
                 )
             )
+
+        return tools
+
+    def build_mcp_server(self) -> Any:
+        """Build an in-process MCP server exposing all discovered commands as tools."""
+        tools = self.build_mcp_tools()
+        if tools is None:
+            return None
+
+        from claude_agent_sdk import create_sdk_mcp_server
 
         return create_sdk_mcp_server("commands", tools=tools)
 

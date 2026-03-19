@@ -290,22 +290,11 @@ class TestBuildMcpServer:
 
         with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "Hello, world!"
-            from claude_agent_sdk import SdkMcpTool
-            tools: list[Any] = []
-            for m in registry._commands.values():
-                schema = registry._build_input_schema(m)
-                async def handler(args: dict, meta: Any = m) -> dict:
-                    filled = {}
-                    for arg_def in meta.args:
-                        if arg_def.name in args:
-                            filled[arg_def.name] = args[arg_def.name]
-                        elif arg_def.default is not None:
-                            filled[arg_def.name] = arg_def.default
-                    result = await registry.execute(meta, filled)
-                    return {"content": [{"type": "text", "text": result}]}
-                tools.append(SdkMcpTool(name=m.name, description=m.description, input_schema=schema, handler=handler))
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
 
-            result = await tools[0].handler({"who": "Alice"})
+            result = await tools["greet"].handler({"who": "Alice"})
             assert result["content"][0]["text"] == "Hello, world!"
             mock_exec.assert_awaited_once()
 
@@ -315,50 +304,26 @@ class TestBuildMcpServer:
 
         with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
             mock_exec.side_effect = CommandError("script failed")
-            server = registry.build_mcp_server()
-            assert server is not None
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
 
-            # Get the tool from SdkMcpTool instances — rebuild with patched execute
-            from claude_agent_sdk import SdkMcpTool
-            for meta in registry._commands.values():
-                schema = registry._build_input_schema(meta)
-                async def err_handler(args: dict, m: Any = meta) -> dict:
-                    try:
-                        await registry.execute(m, args)
-                        return {"content": []}
-                    except CommandError as exc:
-                        return {"content": [{"type": "text", "text": f"Error: {exc.stderr}"}], "is_error": True}
-                tool = SdkMcpTool(name=meta.name, description=meta.description, input_schema=schema, handler=err_handler)
-                result = await tool.handler({})
-                assert result.get("is_error") is True
-                assert "script failed" in result["content"][0]["text"]
+            result = await tools["greet"].handler({})
+            assert result.get("is_error") is True
+            assert "script failed" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
     async def test_tool_handler_fills_defaults(self, registry: CommandRegistry) -> None:
         registry.discover()
-        meta = registry.commands["greet"]  # has optional arg 'who' with default 'world'
 
         with patch.object(registry, "execute", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = "Hello, world!"
-            server = registry.build_mcp_server()
-            assert server is not None
+            tools_list = registry.build_mcp_tools()
+            assert tools_list is not None
+            tools = {t.name: t for t in tools_list}
 
-            # Build a handler that uses real registry.execute (mocked)
-            from claude_agent_sdk import SdkMcpTool
-            schema = registry._build_input_schema(meta)
-            async def default_handler(args: dict, m: Any = meta) -> dict:
-                filled: dict = {}
-                for arg_def in m.args:
-                    if arg_def.name in args:
-                        filled[arg_def.name] = args[arg_def.name]
-                    elif arg_def.default is not None:
-                        filled[arg_def.name] = arg_def.default
-                result = await registry.execute(m, filled)
-                return {"content": [{"type": "text", "text": result}]}
-            tool = SdkMcpTool(name=meta.name, description=meta.description, input_schema=schema, handler=default_handler)
-
-            # Call without the optional arg
-            await tool.handler({})
+            # Call without the optional arg — handler should fill 'who' with default 'world'
+            await tools["greet"].handler({})
             call_args = mock_exec.call_args
             assert call_args[0][1]["who"] == "world"
 
