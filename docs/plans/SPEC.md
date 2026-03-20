@@ -146,8 +146,8 @@ Running `hive init <name>` scaffolds a new Worker:
 
 - Creates the standard folder structure.
 - Initialises a git repo.
-- Creates a `.venv` with base requirements.
-- Generates `hive.toml` and `.env` templates.
+- Creates a bare `.venv` (no pre-installed packages — Worker developers install their own deps via `requirements.txt`).
+- Generates `hive.toml`, `.env`, `requirements.txt`, and `.gitignore` templates.
 - Writes the supervisord program block and reloads supervisord.
 - Installs the macOS LaunchAgent on first use.
 
