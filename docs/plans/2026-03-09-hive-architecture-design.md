@@ -67,7 +67,7 @@ Each `hive run <path>` process runs a single async event loop with four subsyste
                   └────────────────┘
 ```
 
-**Scheduler** runs as a parallel async task in the same process (APScheduler), firing scripts or agent prompts on cron schedule. supervisord's `autorestart=true` handles crash recovery for both the bot and scheduler together.
+**Scheduler** runs as a parallel async task in the same process (APScheduler), firing scripts or agent prompts on cron schedule. Scheduled `agent_prompt` responses are sent to the user's Telegram chat (using `TELEGRAM_ALLOWED_USER_ID`). supervisord's `autorestart=true` handles crash recovery for both the bot and scheduler together.
 
 ---
 
@@ -114,6 +114,23 @@ Hive scans `commands/`, parses docstrings, and builds two registrations:
 2. **MCP tool definitions** — for the agent; MCP server wraps the same subprocess calls
 
 A script works identically whether triggered by `/summarise 10` or by the agent calling the `summarise` tool.
+
+---
+
+## 3b. Built-in Hive Commands
+
+Some commands are built into Hive itself — present on every Worker regardless of what's in `commands/`, not authored by the Worker developer, and not exposed as agent tools. They are meta/control commands that operate on the Worker runtime rather than on Worker data.
+
+**Initial set:**
+
+| Command | What it does |
+|---|---|
+| `/reset` | Clears the agent session for the current Telegram chat ID. The next message starts a fresh conversation with no prior context. |
+| `/help` | Lists all available commands (built-in + user-defined) with their descriptions. |
+
+Built-in handlers are registered by `WorkerRuntime` directly, before user-defined commands. They take precedence: if a user creates `commands/reset.py`, Hive logs a warning and the built-in wins.
+
+Built-in commands are **not** exposed as agent tools — they control the runtime, not the Worker's domain logic.
 
 ---
 
@@ -208,19 +225,21 @@ stderr_logfile=/path/to/budget/logs/err.log
 
 ### macOS LaunchAgent
 
-supervisord itself starts on user login via `~/Library/LaunchAgents/com.hive.supervisord.plist`. Installed once during `hive init` on first use.
+supervisord itself starts on user login via `~/Library/LaunchAgents/com.hive.supervisord.plist`. Installed once during `hive init` on first use, alongside the Comb supervisord block.
 
 ### Hive CLI
 
 | Command | What it does |
 |---|---|
-| `hive init <name>` | Scaffold folder, git init, .venv, hive.toml + .env templates, register with supervisord, install LaunchAgent on first use |
+| `hive init <name>` | Scaffold folder, git init, .venv, hive.toml + .env templates, register with supervisord, install LaunchAgent + Comb block on first use |
 | `hive start <path>` | Write supervisord block + `supervisorctl reread && update && start` |
 | `hive stop <path>` | `supervisorctl stop` |
 | `hive restart <path>` | `supervisorctl restart` |
+| `hive remove <path>` | Stop Worker, remove supervisord block, unregister from HiveRegistry. Use `--delete` to also delete the folder (prompts for confirmation). |
 | `hive status` | `supervisorctl status` for all Workers |
 | `hive logs <path>` | Tail Worker logs |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |
+| `hive comb` | Internal — Comb server entrypoint called by supervisord |
 
 ---
 
@@ -231,7 +250,9 @@ A single Hive-managed web server serves all Workers' dashboards:
 - URL pattern: `localhost:8080/workers/<name>`
 - Config-driven: Workers declare cells in `hive.toml`, no custom code required
 - Cell types: `log`, `file`, `metric` (MVP)
-- Served by Hive process itself (not per-Worker)
+- Runs as its own supervisord program (`hive-comb`), started once on first `hive init`
+- Reads `HiveRegistry` at startup to discover all registered Workers
+- Entrypoint: `hive comb` (internal CLI command, not for direct user use)
 
 ---
 
@@ -240,6 +261,7 @@ A single Hive-managed web server serves all Workers' dashboards:
 ```
 my-worker/
 ├── .git/                  # All changes tracked
+├── .gitignore             # Ignores .env, .venv/, logs/, *.pyc, __pycache__/, *.tmp, .DS_Store
 ├── .venv/                 # Scripts-only venv (not for Hive itself)
 ├── .env                   # Secrets (git-ignored)
 ├── hive.toml              # Worker config
