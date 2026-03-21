@@ -236,7 +236,7 @@ class TestHandleNlMessage:
                 await rt._handle_nl_message(update, MagicMock())
 
         rt._agent.run.assert_awaited_once_with("hello", 100, tmp_path)
-        mock_send.assert_awaited_once_with(update.message, "Agent says hi")
+        mock_send.assert_awaited_once_with(update.message, "Agent says hi", parse_mode="HTML")
         mock_commit.assert_awaited_once_with("agent turn")
 
     @pytest.mark.asyncio

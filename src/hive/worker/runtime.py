@@ -14,7 +14,7 @@ from hive.shared.config import WorkerConfig
 from hive.worker.builtins import BUILTIN_NAMES, make_help_handler, make_reset_handler
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import ClaudeAgentRunner
-from hive.worker.utils import send_long_message
+from hive.worker.utils import send_long_message, md_to_telegram_html
 
 if TYPE_CHECKING:
     from telegram import Update
@@ -166,7 +166,7 @@ class WorkerRuntime:
                 update.effective_chat.id,
                 self._config.worker_dir,
             )
-            await send_long_message(update.message, response)
+            await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
         except Exception:
             logger.exception("Agent error")
             await update.message.reply_text("Something went wrong. Check the logs.")
