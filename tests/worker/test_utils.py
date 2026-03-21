@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from hive.worker.utils import send_long_message
+from hive.worker.utils import send_long_message, md_to_telegram_html
 
 
 # ---------------------------------------------------------------------------
@@ -91,3 +91,71 @@ class TestSendLongMessageTupleTarget:
         bot.send_message.assert_awaited_once_with(
             chat_id=999, text="some text", parse_mode="Markdown"
         )
+
+
+class TestMdToTelegramHtml:
+    def test_plain_text_unchanged(self) -> None:
+        assert md_to_telegram_html("Hello world") == "Hello world"
+
+    def test_html_special_chars_escaped(self) -> None:
+        assert md_to_telegram_html("a < b & c > d") == "a &lt; b &amp; c &gt; d"
+
+    def test_bold_double_asterisk(self) -> None:
+        assert md_to_telegram_html("**hello**") == "<b>hello</b>"
+
+    def test_bold_double_underscore(self) -> None:
+        assert md_to_telegram_html("__hello__") == "<b>hello</b>"
+
+    def test_italic_single_asterisk(self) -> None:
+        assert md_to_telegram_html("*hello*") == "<i>hello</i>"
+
+    def test_italic_single_underscore(self) -> None:
+        assert md_to_telegram_html("_hello_") == "<i>hello</i>"
+
+    def test_bold_before_italic_no_conflict(self) -> None:
+        assert md_to_telegram_html("**bold** and *italic*") == "<b>bold</b> and <i>italic</i>"
+
+    def test_strikethrough(self) -> None:
+        assert md_to_telegram_html("~~gone~~") == "<s>gone</s>"
+
+    def test_inline_code(self) -> None:
+        assert md_to_telegram_html("`code`") == "<code>code</code>"
+
+    def test_inline_code_escapes_html(self) -> None:
+        assert md_to_telegram_html("`a < b`") == "<code>a &lt; b</code>"
+
+    def test_fenced_code_block(self) -> None:
+        result = md_to_telegram_html("```\nprint('hi')\n```")
+        assert result == "<pre>print('hi')\n</pre>"
+
+    def test_fenced_code_block_with_language(self) -> None:
+        result = md_to_telegram_html("```python\nx = 1\n```")
+        assert result == "<pre>x = 1\n</pre>"
+
+    def test_fenced_code_escapes_html(self) -> None:
+        result = md_to_telegram_html("```\na < b\n```")
+        assert result == "<pre>a &lt; b\n</pre>"
+
+    def test_link(self) -> None:
+        assert md_to_telegram_html("[click](https://example.com)") == '<a href="https://example.com">click</a>'
+
+    def test_h1_header(self) -> None:
+        assert md_to_telegram_html("# Heading") == "<b>Heading</b>"
+
+    def test_h3_header(self) -> None:
+        assert md_to_telegram_html("### Deep heading") == "<b>Deep heading</b>"
+
+    def test_code_block_content_not_processed_as_markdown(self) -> None:
+        result = md_to_telegram_html("```\n**not bold**\n```")
+        assert result == "<pre>**not bold**\n</pre>"
+
+    def test_inline_code_content_not_processed_as_markdown(self) -> None:
+        result = md_to_telegram_html("`**not bold**`")
+        assert result == "<code>**not bold**</code>"
+
+    def test_mixed_content(self) -> None:
+        text = "**Title**\n\nSome `code` here.\n\n```python\nx = 1\n```"
+        result = md_to_telegram_html(text)
+        assert "<b>Title</b>" in result
+        assert "<code>code</code>" in result
+        assert "<pre>x = 1\n</pre>" in result
