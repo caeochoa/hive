@@ -36,6 +36,7 @@ Each `hive run <path>` process runs a single async event loop:
 - Routes natural language messages to the Claude Agent SDK
 - Runs scheduled tasks (APScheduler, same process)
 - Auto-commits any file writes to the Worker's git repo after each turn
+- Emits structured logs to stdout: `%(asctime)s %(name)s %(levelname)s %(message)s`
 
 supervisord's `autorestart=true` handles crash recovery for the whole process.
 
@@ -58,7 +59,9 @@ args:
 ```
 
 **Execution contract:**
-- Hive invokes scripts as: `.venv/bin/python commands/<script>.py --arg value`
+- Hive invokes scripts as: `.venv/bin/python commands/<script>.py [--arg value | --flag]`
+- Scripts may have a shebang line (`#!`) — Hive skips it when parsing docstrings
+- `bool` args are passed as flags (`--name` only, no value); other types as `--name value`
 - Stdout → Telegram reply
 - Non-zero exit → error, stderr surfaced to user
 - `WORKER_DIR` env var set by Hive so scripts can access Worker folder files
@@ -76,17 +79,26 @@ Powered by the **Claude Agent SDK** (`claude-agent-sdk`). Key design points:
 - Hive auto-commits any modified files after each agent turn
 
 ```python
-from claude_agent_sdk import query, ClaudeAgentOptions
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
 options = ClaudeAgentOptions(
     system_prompt="You are a worker agent. Your world is this folder.",
     allowed_tools=["Read", "Write", "Bash", "Glob"],
-    permission_mode="acceptEdits",
+    permission_mode="bypassPermissions",
     cwd="/path/to/worker-folder",
     mcp_servers={"commands": commands_mcp_server},
     model="claude-haiku-4-5",
     max_turns=10,
 )
+
+# Streaming response pattern
+parts: list[str] = []
+async for msg in query(prompt=message, options=options):
+    if isinstance(msg, AssistantMessage):
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                parts.append(block.text)
+response = "".join(parts)
 ```
 
 ### Secrets management
@@ -133,7 +145,7 @@ Workers run as OS processes managed by **supervisord**. `hive start`/`hive stop`
 
 ### Comb (web dashboard)
 
-A single centralised Hive web server serves all Workers at `localhost:8080/workers/<name>`. Config-driven — no custom code per Worker.
+A single centralised Hive web server serves all Workers at `<host>:8080/workers/<name>`. Binds to `0.0.0.0` (LAN-accessible). Config-driven — no custom code per Worker.
 
 MVP cell types:
 

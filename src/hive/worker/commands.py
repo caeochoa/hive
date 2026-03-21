@@ -58,6 +58,8 @@ class CommandRegistry:
     def _parse_script(self, path: Path) -> CommandMeta:
         """Extract and parse the YAML docstring from a command script."""
         source = path.read_text(encoding="utf-8")
+        if source.startswith("#!"):
+            source = source[source.index("\n") + 1:]
         match = _DOCSTRING_RE.search(source)
         if not match:
             raise ValueError(f"No docstring found in {path}")
@@ -87,8 +89,15 @@ class CommandRegistry:
         venv_python = self._config.worker_dir / ".venv" / "bin" / "python"
 
         cmd_args: list[str] = [str(venv_python), meta.script_path]
-        for key, value in args.items():
-            cmd_args.extend([f"--{key}", str(value)])
+        for arg_def in meta.args:
+            if arg_def.name not in args:
+                continue
+            value = args[arg_def.name]
+            if arg_def.type == "bool":
+                if value:
+                    cmd_args.append(f"--{arg_def.name}")
+            else:
+                cmd_args.append(str(value))
 
         env = {**os.environ, "WORKER_DIR": str(self._config.worker_dir)}
 

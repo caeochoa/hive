@@ -245,9 +245,16 @@ def logs(
 def run(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     """[Internal] Worker entrypoint called by supervisord."""
     import asyncio
+    import logging
 
     from hive.shared.config import ConfigError, load_worker_config
     from hive.worker.runtime import WorkerRuntime
+
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stdout,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
 
     worker_dir = Path(path).resolve()
     try:

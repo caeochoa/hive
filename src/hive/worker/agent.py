@@ -110,7 +110,7 @@ class ClaudeAgentRunner(AgentRunner):
                     "You are a worker agent. Your world is this folder.",
                 ),
                 allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
-                permission_mode="acceptEdits",
+                permission_mode="bypassPermissions",
                 cwd=str(self._worker_dir),
                 mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
                 model=self._config.model,
@@ -125,30 +125,6 @@ class ClaudeAgentRunner(AgentRunner):
             self._clients[chat_id] = client
 
         return self._clients[chat_id]
-
-    async def _create_one_shot_client(self) -> tuple[Any, AsyncExitStack]:
-        """Create a disposable client for scheduled / one-shot prompts."""
-        from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-
-        stack = AsyncExitStack()
-
-        options = ClaudeAgentOptions(
-            system_prompt=getattr(
-                self._config,
-                "system_prompt",
-                "You are a worker agent. Your world is this folder.",
-            ),
-            allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
-            permission_mode="acceptEdits",
-            cwd=str(self._worker_dir),
-            mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
-            model=self._config.model,
-            max_turns=self._config.max_turns,
-        )
-
-        client = ClaudeSDKClient(options)
-        await stack.enter_async_context(client)
-        return client, stack
 
     # ------------------------------------------------------------------ #
     # Run
@@ -167,32 +143,54 @@ class ClaudeAgentRunner(AgentRunner):
 
     async def _run_one_shot(self, message: str) -> str:
         """Execute a one-shot prompt with a disposable client."""
-        from claude_agent_sdk import query
+        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
-        client, stack = await self._create_one_shot_client()
-        try:
-            result = await query(client=client, prompt=message)
-            return result.response
-        finally:
-            await stack.aclose()
+        options = ClaudeAgentOptions(
+            system_prompt=getattr(
+                self._config,
+                "system_prompt",
+                "You are a worker agent. Your world is this folder.",
+            ),
+            allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
+            permission_mode="bypassPermissions",
+            cwd=str(self._worker_dir),
+            mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
+            model=self._config.model,
+            max_turns=self._config.max_turns,
+        )
+
+        parts: list[str] = []
+        async for msg in query(prompt=message, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        parts.append(block.text)
+        return "".join(parts)
 
     async def _run_interactive(self, message: str, chat_id: int) -> str:
         """Execute a message within a persistent, locked session."""
-        from claude_agent_sdk import query
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
         lock = self._get_lock(chat_id)
         async with lock:
             client = await self._get_or_create_client(chat_id)
-            result = await query(client=client, prompt=message)
+            await client.query(message)
 
-            # Persist session_id from the client
-            self._sessions[chat_id] = {
-                "chat_id": chat_id,
-                "session_id": getattr(client, "session_id", ""),
-            }
+            parts: list[str] = []
+            async for msg in client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            parts.append(block.text)
+                elif isinstance(msg, ResultMessage):
+                    if msg.session_id:
+                        self._sessions[chat_id] = {
+                            "chat_id": chat_id,
+                            "session_id": msg.session_id,
+                        }
+
             self._save_sessions()
-
-            return result.response
+            return "".join(parts)
 
     # ------------------------------------------------------------------ #
     # Reset / Close
