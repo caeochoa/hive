@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from hive.shared.config import WorkerConfig
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import AgentRunner
-from hive.worker.utils import send_long_message
+from hive.worker.utils import send_long_message, md_to_telegram_html
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,9 @@ class WorkerScheduler:
                 prompt, chat_id=None, worker_dir=self._config.worker_dir
             )
             await send_long_message(
-                (self._bot, self._allowed_user_id), response
+                (self._bot, self._allowed_user_id),
+                md_to_telegram_html(response),
+                parse_mode="HTML",
             )
         finally:
             await self._auto_commit("scheduled agent prompt")

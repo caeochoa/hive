@@ -177,6 +177,6 @@ class TestRunAgentPrompt:
             "Do the thing", chat_id=None, worker_dir=config.worker_dir
         )
         bot.send_message.assert_awaited_once_with(
-            chat_id=12345, text="Agent response text"
+            chat_id=12345, text="Agent response text", parse_mode="HTML"
         )
         auto_commit.assert_awaited_once()
