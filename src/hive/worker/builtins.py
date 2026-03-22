@@ -107,7 +107,7 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_id: int):
 
     async def handle(update, context) -> None:
         from hive.worker.commands import CommandError
-        from hive.worker.utils import send_long_message
+        from hive.worker.utils import send_long_message, md_to_telegram_html
 
         query = update.callback_query
         user = query.from_user

@@ -106,7 +106,11 @@ async def get_cell(name: str, i: int):
         else:
             raise HTTPException(400, f"Unknown cell type: {cell.type}")
     except CellRenderError as e:
+        logger.error("Cell render error [worker=%s cell=%d]: %s", name, i, e)
         raise HTTPException(500, str(e))
+    except Exception:
+        logger.exception("Unexpected error rendering cell [worker=%s cell=%d]", name, i)
+        raise
     return JSONResponse({
         "content": content, "title": cell.title, "type": cell.type,
         "subtitle": subtitle, "is_markdown": is_markdown,
@@ -144,9 +148,12 @@ async def _sse_log_generator(log_path: Path):
                     await asyncio.sleep(0.5)
     except asyncio.CancelledError:
         return
+    except Exception:
+        logger.exception("SSE stream error for %s", log_path)
 
 def serve(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     resolved = _find_free_port(port if port is not None else 8080)
     PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
     PORT_FILE.write_text(str(resolved))

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class CellRenderError(Exception):
@@ -43,7 +46,10 @@ def render_markdown_cell(source: Path) -> str:
     """
     import mistune
     content = render_file_cell(source)
-    return mistune.html(content)
+    try:
+        return mistune.html(content)
+    except Exception as e:
+        raise CellRenderError(f"Markdown render failed: {e}") from e
 
 
 def render_metric_cell(source: Path, key: str) -> str:
@@ -69,6 +75,7 @@ def tail_log_file(source: Path, lines: int = 100) -> list[str]:
     and returns the last N.
     """
     if not source.is_file():
+        logger.warning("Log file not found: %s", source)
         return []
 
     file_size = source.stat().st_size
