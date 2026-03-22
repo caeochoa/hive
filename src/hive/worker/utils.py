@@ -70,6 +70,15 @@ def _md_convert_inline(text: str) -> str:
     return text
 
 
+def _balance_pre_tags(chunk: str, remainder: str) -> tuple[str, str]:
+    """Close any open <pre> tags at the end of chunk and reopen them in remainder."""
+    diff = chunk.count("<pre>") - chunk.count("</pre>")
+    if diff > 0:
+        chunk += "</pre>" * diff
+        remainder = "<pre>" * diff + remainder
+    return chunk, remainder
+
+
 async def send_long_message(target, text: str, **kwargs) -> None:
     """Split text into <=4096-char chunks at line boundaries and send each."""
     MAX_LEN = 4096
@@ -81,6 +90,8 @@ async def send_long_message(target, text: str, **kwargs) -> None:
             if split_at == -1:
                 split_at = MAX_LEN
             chunk, text = text[:split_at], text[split_at:].lstrip("\n")
+            if kwargs.get("parse_mode") == "HTML":
+                chunk, text = _balance_pre_tags(chunk, text)
         if hasattr(target, "reply_text"):
             await target.reply_text(chunk, **kwargs)
         else:

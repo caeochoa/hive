@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +16,11 @@ from telegram.ext import CommandHandler, ContextTypes
 
 from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandArg, CommandMeta
+from hive.worker.utils import md_to_telegram_html, send_long_message
 
 logger = logging.getLogger(__name__)
 
-_DOCSTRING_RE = re.compile(r'^"""(.*?)"""', re.DOTALL)
+_DOCSTRING_RE = re.compile(r'^\s*"""(.*?)"""', re.DOTALL)
 
 
 class CommandError(Exception):
@@ -54,14 +56,17 @@ class CommandRegistry:
                 self._commands[meta.name] = meta
             except (ValueError, yaml.YAMLError) as exc:
                 logger.warning("Skipping invalid command script %s: %s", path, exc)
+        logger.info("Discovered %d commands: %s", len(self._commands), list(self._commands))
 
     def _parse_script(self, path: Path) -> CommandMeta:
         """Extract and parse the YAML docstring from a command script."""
         source = path.read_text(encoding="utf-8")
         if source.startswith("#!"):
             source = source[source.index("\n") + 1:]
+        logger.debug("Parsing %s (source[:50]=%r)", path.name, source[:50])
         match = _DOCSTRING_RE.search(source)
         if not match:
+            logger.warning("No docstring match in %s, source[:80]=%r", path.name, source[:80])
             raise ValueError(f"No docstring found in {path}")
 
         raw = yaml.safe_load(match.group(1))
@@ -88,6 +93,7 @@ class CommandRegistry:
         """Run a command script as a subprocess and return its stdout."""
         venv_python = self._config.worker_dir / ".venv" / "bin" / "python"
 
+        logger.info("Executing command %r with args %r", meta.name, args)
         cmd_args: list[str] = [str(venv_python), meta.script_path]
         for arg_def in meta.args:
             if arg_def.name not in args:
@@ -99,6 +105,7 @@ class CommandRegistry:
             else:
                 cmd_args.append(str(value))
 
+        logger.debug("Subprocess args: %r", cmd_args)
         env = {**os.environ, "WORKER_DIR": str(self._config.worker_dir)}
 
         proc = await asyncio.create_subprocess_exec(
@@ -112,7 +119,9 @@ class CommandRegistry:
         if proc.returncode != 0:
             raise CommandError(stderr.decode("utf-8", errors="replace"))
 
-        return stdout.decode("utf-8", errors="replace")
+        result = stdout.decode("utf-8", errors="replace")
+        logger.info("Command %r returned %d chars", meta.name, len(result))
+        return result
 
     def telegram_handlers(self) -> list[CommandHandler]:
         """Build a Telegram CommandHandler for each discovered command."""
@@ -135,18 +144,23 @@ class CommandRegistry:
             # Parse positional args from context.args
             args: dict[str, str | int | float | bool] = {}
             telegram_args = context.args or []
-            for i, arg_def in enumerate(meta.args):
+            arg_defs = meta.args
+            for i, arg_def in enumerate(arg_defs):
+                is_last = i == len(arg_defs) - 1
                 if i < len(telegram_args):
-                    args[arg_def.name] = _cast_arg(telegram_args[i], arg_def.type)
+                    if is_last and arg_def.type == "str" and len(telegram_args) > i + 1:
+                        args[arg_def.name] = " ".join(telegram_args[i:])
+                    else:
+                        args[arg_def.name] = _cast_arg(telegram_args[i], arg_def.type)
                 elif arg_def.default is not None:
                     args[arg_def.name] = arg_def.default
                 # If required and not provided, skip — script will error
 
             try:
                 result = await self.execute(meta, args)
-                await update.message.reply_text(result or "(no output)")  # type: ignore[union-attr]
+                await send_long_message(update.message, md_to_telegram_html(result or "(no output)"), parse_mode="HTML")  # type: ignore[union-attr]
             except CommandError as exc:
-                await update.message.reply_text(f"Error: {exc.stderr}")  # type: ignore[union-attr]
+                await send_long_message(update.message, f"Error: {exc.stderr}", parse_mode="HTML")  # type: ignore[union-attr]
 
         return CommandHandler(meta.name, callback)
 
