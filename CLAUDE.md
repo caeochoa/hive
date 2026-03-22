@@ -163,6 +163,7 @@ MVP cell types:
 | `hive start <path>` | Write supervisord block + `supervisorctl reread && update && start` |
 | `hive stop <path>` | `supervisorctl stop` |
 | `hive restart <path>` | `supervisorctl restart` |
+| `hive remove <path>` | Unregister and stop a Worker; `--delete` also deletes the folder |
 | `hive status` | `supervisorctl status` for all Workers |
-| `hive logs <path>` | Tail Worker logs |
+| `hive logs <path>` | Tail Worker logs (`-n <lines>`, `-f` to follow) |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |
