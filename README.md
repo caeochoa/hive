@@ -38,10 +38,10 @@ The core idea is **one folder = one world**. A Worker folder contains everything
 ```bash
 git clone <repo>
 cd hive
-uv sync
+uv install tool .
 ```
 
-The `hive` CLI is now available via `uv run hive`.
+The `hive` CLI is now available via `hive`.
 
 ---
 
@@ -50,7 +50,7 @@ The `hive` CLI is now available via `uv run hive`.
 ### 1. Scaffold a Worker folder
 
 ```bash
-uv run hive init my-bot
+hive init my-bot
 ```
 
 This creates `./my-bot/`, registers it with supervisord, and installs a macOS LaunchAgent on first use so supervisord starts at login.
@@ -114,7 +114,7 @@ cells = [
 ### 5. Start the Worker
 
 ```bash
-uv run hive start ./my-bot
+hive start ./my-bot
 ```
 
 ### 6. Open the dashboard
