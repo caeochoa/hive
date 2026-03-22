@@ -267,15 +267,48 @@ def run(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     asyncio.run(runtime.run())
 
 
-@app.command(hidden=True)
-def comb(
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8080, "--port"),
+comb_app = typer.Typer(help="Manage the Comb dashboard server.")
+app.add_typer(comb_app, name="comb")
+
+
+@comb_app.command("serve", hidden=True)
+def comb_serve(
+    host: str = typer.Option("127.0.0.1"),
+    port: int | None = typer.Option(None),
 ) -> None:
     """[Internal] Comb dashboard server entrypoint."""
     from hive.comb.server import serve
 
     serve(host=host, port=port)
+
+
+@comb_app.command("start")
+def comb_start() -> None:
+    """Start the Comb dashboard server."""
+    from hive.shared.supervisor import reload_supervisord, supervisorctl
+
+    reload_supervisord()
+    result = supervisorctl("start", "hive-comb")
+    typer.echo(result.stdout.strip() if result.stdout else "Started hive-comb")
+
+
+@comb_app.command("stop")
+def comb_stop() -> None:
+    """Stop the Comb dashboard server."""
+    from hive.shared.supervisor import supervisorctl
+
+    result = supervisorctl("stop", "hive-comb")
+    typer.echo(result.stdout.strip() if result.stdout else "Stopped hive-comb")
+
+
+@comb_app.command("restart")
+def comb_restart() -> None:
+    """Restart the Comb dashboard server."""
+    from hive.shared.supervisor import reload_supervisord, supervisorctl
+
+    reload_supervisord()
+    result = supervisorctl("restart", "hive-comb")
+    typer.echo(result.stdout.strip() if result.stdout else "Restarted hive-comb")
 
 
 def _write_if_missing(path: Path, content: str) -> None:

@@ -37,7 +37,7 @@ stderr_logfile={path}/logs/err.log
 
 COMB_BLOCK_TEMPLATE = """\
 [program:hive-comb]
-command=hive comb --host 0.0.0.0
+command=hive comb serve --host 0.0.0.0
 autostart=true
 autorestart=true
 stdout_logfile={home}/.config/hive/comb.log
