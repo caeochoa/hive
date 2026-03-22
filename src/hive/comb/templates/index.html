@@ -1,12 +1,50 @@
 <!DOCTYPE html>
-<html><head><title>Hive Comb</title>
-<style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:0 1rem}
-a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
-.worker{padding:0.5rem 0;border-bottom:1px solid #e5e7eb}</style>
-</head><body>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hive Comb</title>
+<style>
+body[data-theme="terminal-dark"] {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --text-muted: #8b949e; --accent: #58a6ff;
+  --status-ok: #3fb950; --shadow: none;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; padding: 2rem 1.5rem;
+}
+h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.25rem; }
+.subtitle { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.worker-list { display: flex; flex-direction: column; gap: 0.5rem; max-width: 480px; }
+.worker-card {
+  display: flex; align-items: center; gap: 0.75rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.625rem 0.875rem;
+  box-shadow: var(--shadow); transition: border-color 0.15s;
+}
+.worker-card:hover { border-color: var(--accent); }
+.worker-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); flex-shrink: 0; }
+.worker-name { font-size: 0.9rem; font-weight: 500; }
+.empty { color: var(--text-muted); font-size: 0.85rem; }
+</style>
+</head>
+<body data-theme="terminal-dark">
 <h1>Hive Comb</h1>
-<p>{{ workers|length }} worker(s) registered</p>
+<p class="subtitle">{{ workers|length }} worker{% if workers|length != 1 %}s{% endif %} registered</p>
+<div class="worker-list">
 {% for name in workers %}
-<div class="worker"><a href="/workers/{{ name }}">{{ name }}</a></div>
+<a href="/workers/{{ name }}" class="worker-card">
+  <span class="worker-dot"></span>
+  <span class="worker-name">{{ name }}</span>
+</a>
+{% else %}
+<p class="empty">No workers registered yet. Run <code>hive init</code> to get started.</p>
 {% endfor %}
-</body></html>
+</div>
+</body>
+</html>

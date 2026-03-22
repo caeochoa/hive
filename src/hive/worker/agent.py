@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -69,6 +70,7 @@ class ClaudeAgentRunner(AgentRunner):
             except (json.JSONDecodeError, Exception):
                 logger.warning("Failed to load sessions from %s", self._sessions_file)
                 self._sessions = {}
+        logger.debug("Loaded %d sessions from %s", len(self._sessions), self._sessions_file)
 
     def _save_sessions(self) -> None:
         """Persist current sessions to disk as JSON."""
@@ -102,6 +104,10 @@ class ClaudeAgentRunner(AgentRunner):
             self._exit_stacks[chat_id] = stack
 
             session_id = self._sessions.get(chat_id, {}).get("session_id")
+            if session_id:
+                logger.info("Resuming session for chat_id=%d", chat_id)
+            else:
+                logger.info("Creating new client for chat_id=%d", chat_id)
 
             options = ClaudeAgentOptions(
                 system_prompt=getattr(
@@ -159,13 +165,18 @@ class ClaudeAgentRunner(AgentRunner):
             max_turns=self._config.max_turns,
         )
 
+        logger.info("Agent one-shot query: %r", message[:80])
+        t0 = time.monotonic()
         parts: list[str] = []
         async for msg in query(prompt=message, options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         parts.append(block.text)
-        return "".join(parts)
+        elapsed = time.monotonic() - t0
+        response = "".join(parts)
+        logger.info("Agent one-shot complete: %d chars in %.1fs", len(response), elapsed)
+        return response
 
     async def _run_interactive(self, message: str, chat_id: int) -> str:
         """Execute a message within a persistent, locked session."""
@@ -173,6 +184,8 @@ class ClaudeAgentRunner(AgentRunner):
 
         lock = self._get_lock(chat_id)
         async with lock:
+            logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
+            t0 = time.monotonic()
             client = await self._get_or_create_client(chat_id)
             await client.query(message)
 
@@ -188,9 +201,13 @@ class ClaudeAgentRunner(AgentRunner):
                             "chat_id": chat_id,
                             "session_id": msg.session_id,
                         }
+                        logger.debug("Session updated for chat_id=%d", chat_id)
 
+            elapsed = time.monotonic() - t0
+            response = "".join(parts)
+            logger.info("Agent response chat_id=%d: %d chars in %.1fs", chat_id, len(response), elapsed)
             self._save_sessions()
-            return "".join(parts)
+            return response
 
     # ------------------------------------------------------------------ #
     # Reset / Close

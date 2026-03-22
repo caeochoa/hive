@@ -83,17 +83,21 @@ class WorkerScheduler:
 
     async def _run_command(self, meta) -> None:
         """Execute a scheduled command and auto-commit."""
+        logger.info("Scheduled command starting: %s", meta.name)
         try:
             await self._registry.execute(meta, {})
+            logger.info("Scheduled command complete: %s", meta.name)
         finally:
             await self._auto_commit("scheduled command: " + meta.name)
 
     async def _run_agent_prompt(self, prompt: str) -> None:
         """Execute a scheduled agent prompt, send the response, and auto-commit."""
+        logger.info("Scheduled agent prompt starting: %r", prompt[:60])
         try:
             response = await self._agent.run(
                 prompt, chat_id=None, worker_dir=self._config.worker_dir
             )
+            logger.info("Scheduled agent prompt complete: %d chars", len(response))
             await send_long_message(
                 (self._bot, self._allowed_user_id),
                 md_to_telegram_html(response),

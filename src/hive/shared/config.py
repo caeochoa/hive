@@ -22,6 +22,7 @@ class WorkerConfig(BaseModel):
     agent_system_prompt: Optional[str] = None
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
+    comb_theme: str = "terminal-dark"
 
 
 def load_worker_config(worker_dir: Path) -> WorkerConfig:
@@ -47,7 +48,9 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
     worker_section = raw.get("worker", {})
     agent_section = raw.get("agent", {})
     schedule_raw = raw.get("schedule", [])
-    comb_raw = raw.get("comb", {}).get("cells", [])
+    comb_section = raw.get("comb", {})
+    comb_raw = comb_section.get("cells", [])
+    comb_theme = comb_section.get("theme", "terminal-dark")
 
     return WorkerConfig(
         name=worker_section["name"],
@@ -60,4 +63,5 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
         agent_system_prompt=agent_section.get("system_prompt"),
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
+        comb_theme=comb_theme,
     )

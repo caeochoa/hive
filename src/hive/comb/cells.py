@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 
 class CellRenderError(Exception):
     """Raised when cell rendering fails."""
+
+
+def resolve_latest_in_dir(source: Path) -> Path:
+    """If source is a directory, return the most recently modified file in it.
+
+    If source is a file, return it as-is.
+    Raises CellRenderError if the directory is empty or contains no files.
+    """
+    if source.is_file():
+        return source
+    if source.is_dir():
+        files = [f for f in source.iterdir() if f.is_file()]
+        if not files:
+            raise CellRenderError(f"No files found in directory: {source}")
+        return max(files, key=lambda f: f.stat().st_mtime)
+    raise CellRenderError(f"File not found: {source}")
 
 
 def render_file_cell(source: Path) -> str:
@@ -19,6 +34,16 @@ def render_file_cell(source: Path) -> str:
     if not source.is_file():
         raise CellRenderError(f"File not found: {source}")
     return source.read_text()
+
+
+def render_markdown_cell(source: Path) -> str:
+    """Render a Markdown file as an HTML string.
+
+    Raises CellRenderError if file doesn't exist.
+    """
+    import mistune
+    content = render_file_cell(source)
+    return mistune.html(content)
 
 
 def render_metric_cell(source: Path, key: str) -> str:
@@ -83,3 +108,85 @@ def tail_log_file(source: Path, lines: int = 100) -> list[str]:
         if decoded and decoded[-1] == "":
             decoded = decoded[:-1]
         return decoded[-lines:]
+
+
+_STATUS_OK = {"ok", "success", "pass", "true", "running", "1"}
+_STATUS_WARN = {"warn", "warning", "degraded"}
+_STATUS_ERROR = {"error", "fail", "failed", "false", "stopped", "down", "0"}
+
+
+def render_status_cell(source: Path, key: str) -> dict:
+    """Read a JSON file, extract key, return value with semantic level.
+
+    Returns {"value": str, "level": "ok"|"warn"|"error"|"neutral"}.
+    Raises CellRenderError if file missing, JSON invalid, or key not found.
+    """
+    if not source.is_file():
+        raise CellRenderError(f"File not found: {source}")
+    try:
+        data = json.loads(source.read_text())
+    except json.JSONDecodeError as exc:
+        raise CellRenderError(f"Invalid JSON in {source}: {exc}") from exc
+    if key not in data:
+        raise CellRenderError(f"Key {key!r} not found in {source}")
+    value = str(data[key]).lower()
+    if value in _STATUS_OK:
+        level = "ok"
+    elif value in _STATUS_WARN:
+        level = "warn"
+    elif value in _STATUS_ERROR:
+        level = "error"
+    else:
+        level = "neutral"
+    return {"value": str(data[key]), "level": level}
+
+
+def render_table_cell(source: Path) -> list:
+    """Read a JSON array of objects for table rendering.
+
+    Raises CellRenderError if file missing, JSON invalid, or not a list.
+    """
+    if not source.is_file():
+        raise CellRenderError(f"File not found: {source}")
+    try:
+        data = json.loads(source.read_text())
+    except json.JSONDecodeError as exc:
+        raise CellRenderError(f"Invalid JSON in {source}: {exc}") from exc
+    if not isinstance(data, list):
+        raise CellRenderError(f"Expected JSON array in {source}, got {type(data).__name__}")
+    return data
+
+
+def render_chart_cell(source: Path, key: str | None = None) -> list:
+    """Read numeric data for chart rendering.
+
+    If key is given, extracts that key from a JSON object.
+    Otherwise expects the file to contain a JSON array.
+    Returns a list of {"label": str, "value": float} dicts.
+    Raises CellRenderError on any data problem.
+    """
+    if not source.is_file():
+        raise CellRenderError(f"File not found: {source}")
+    try:
+        data = json.loads(source.read_text())
+    except json.JSONDecodeError as exc:
+        raise CellRenderError(f"Invalid JSON in {source}: {exc}") from exc
+
+    if key is not None:
+        if not isinstance(data, dict) or key not in data:
+            raise CellRenderError(f"Key {key!r} not found in {source}")
+        data = data[key]
+
+    if not isinstance(data, list):
+        raise CellRenderError(f"Expected JSON array for chart in {source}")
+
+    result = []
+    for i, item in enumerate(data):
+        if isinstance(item, (int, float)):
+            result.append({"label": str(i), "value": float(item)})
+        elif isinstance(item, dict) and "value" in item:
+            label = str(item.get("label", i))
+            result.append({"label": label, "value": float(item["value"])})
+        else:
+            raise CellRenderError(f"Chart data item {i} must be a number or {{label, value}} object")
+    return result

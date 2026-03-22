@@ -34,15 +34,15 @@ class ScheduleEntry(BaseModel):
 
 
 class CombCell(BaseModel):
-    type: str  # "log", "file", "metric"
+    type: str  # "log", "file", "metric", "status", "table", "chart"
     title: str
     source: str
     key: Optional[str] = None
 
     @model_validator(mode="after")
     def check_metric_key(self) -> "CombCell":
-        if self.type == "metric" and self.key is None:
-            raise ValueError("CombCell of type 'metric' requires a 'key'")
+        if self.type in ("metric", "status") and self.key is None:
+            raise ValueError(f"CombCell of type '{self.type}' requires a 'key'")
         return self
 
 

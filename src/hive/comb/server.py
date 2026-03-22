@@ -1,13 +1,32 @@
+import atexit
+import socket
 import time
 import asyncio
 import logging
 from pathlib import Path
+
+PORT_FILE = Path.home() / ".config" / "hive" / "comb.port"
+
+
+def _find_free_port(start: int = 8080) -> int:
+    port = start
+    while True:
+        with socket.socket() as s:
+            try:
+                s.bind(("", port))
+                return port
+            except OSError:
+                port += 1
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from hive.shared.registry import HiveRegistry
 from hive.shared.config import load_worker_config, WorkerConfig
-from hive.comb.cells import render_file_cell, render_metric_cell, tail_log_file, CellRenderError
+from hive.comb.cells import (
+    render_file_cell, render_markdown_cell, render_metric_cell,
+    render_status_cell, render_table_cell, render_chart_cell,
+    tail_log_file, resolve_latest_in_dir, CellRenderError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +68,7 @@ async def worker_dashboard(request: Request, name: str):
     cell_types = [c.type for c in cfg.comb_cells]
     return templates.TemplateResponse(request, "worker.html", {
         "name": name, "cells": cfg.comb_cells, "cell_types": cell_types,
+        "theme": cfg.comb_theme,
     })
 
 @app.get("/workers/{name}/cells/{i}")
@@ -61,19 +81,36 @@ async def get_cell(name: str, i: int):
         raise HTTPException(404, "Cell index out of range")
     cell = cfg.comb_cells[i]
     source = cfg.worker_dir / cell.source
+    subtitle = None
+    is_markdown = False
     try:
         if cell.type == "file":
-            content = render_file_cell(source)
+            resolved = resolve_latest_in_dir(source)
+            subtitle = resolved.name if resolved != source else None
+            if resolved.suffix == ".md":
+                content = render_markdown_cell(resolved)
+                is_markdown = True
+            else:
+                content = render_file_cell(resolved)
         elif cell.type == "metric":
             content = render_metric_cell(source, cell.key)
         elif cell.type == "log":
             lines = tail_log_file(source)
             content = "\n".join(lines)
+        elif cell.type == "status":
+            content = render_status_cell(source, cell.key)
+        elif cell.type == "table":
+            content = render_table_cell(source)
+        elif cell.type == "chart":
+            content = render_chart_cell(source, cell.key)
         else:
             raise HTTPException(400, f"Unknown cell type: {cell.type}")
     except CellRenderError as e:
         raise HTTPException(500, str(e))
-    return JSONResponse({"content": content, "title": cell.title, "type": cell.type})
+    return JSONResponse({
+        "content": content, "title": cell.title, "type": cell.type,
+        "subtitle": subtitle, "is_markdown": is_markdown,
+    })
 
 @app.get("/workers/{name}/cells/{i}/stream")
 async def stream_cell(name: str, i: int):
@@ -108,6 +145,10 @@ async def _sse_log_generator(log_path: Path):
     except asyncio.CancelledError:
         return
 
-def serve(host: str = "127.0.0.1", port: int = 8080) -> None:
+def serve(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    resolved = _find_free_port(port if port is not None else 8080)
+    PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PORT_FILE.write_text(str(resolved))
+    atexit.register(lambda: PORT_FILE.unlink(missing_ok=True))
+    uvicorn.run(app, host=host, port=resolved)
