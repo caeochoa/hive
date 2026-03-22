@@ -8,10 +8,17 @@ import signal
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram import BotCommand
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from hive.shared.config import WorkerConfig
-from hive.worker.builtins import BUILTIN_NAMES, make_help_handler, make_reset_handler
+from hive.worker.builtins import (
+    BUILTIN_NAMES,
+    make_callback_handler,
+    make_help_handler,
+    make_menu_handler,
+    make_reset_handler,
+)
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import ClaudeAgentRunner
 from hive.worker.utils import send_long_message, md_to_telegram_html
@@ -87,6 +94,16 @@ class WorkerRuntime:
         await self._app.start()
         await self._app.updater.start_polling()
 
+        bot_commands = [
+            BotCommand("reset", "Start a fresh conversation"),
+            BotCommand("help", "Show available commands"),
+            BotCommand("menu", "Quick command launcher"),
+        ] + [
+            BotCommand(m.name, m.description[:255])
+            for m in self._registry.commands.values()
+        ]
+        await self._app.bot.set_my_commands(bot_commands)
+
         # Lazy-import scheduler to avoid hard failure if apscheduler isn't installed
         from hive.worker.scheduler import WorkerScheduler  # noqa: WPS433
 
@@ -132,8 +149,12 @@ class WorkerRuntime:
         # Built-in handlers
         reset_handler = make_reset_handler(self._agent, self._config.telegram_allowed_user_id)
         help_handler = make_help_handler(self._registry, BUILTIN_NAMES, self._config.telegram_allowed_user_id)
+        menu_handler = make_menu_handler(self._registry, self._config.telegram_allowed_user_id)
+        callback_handler = make_callback_handler(self._registry, self._config.telegram_allowed_user_id)
         self._app.add_handler(CommandHandler("reset", reset_handler))
         self._app.add_handler(CommandHandler("help", help_handler))
+        self._app.add_handler(CommandHandler("menu", menu_handler))
+        self._app.add_handler(CallbackQueryHandler(callback_handler))
 
         # User command handlers (warn on collision with built-ins)
         for handler in self._registry.telegram_handlers():
