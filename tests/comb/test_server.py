@@ -27,7 +27,7 @@ def _make_config(tmp_path: Path) -> WorkerConfig:
         name="test",
         worker_dir=tmp_path,
         telegram_bot_token="tok",
-        telegram_allowed_user_id=1,
+        telegram_allowed_user_ids=[1],
         comb_cells=[
             CombCell(type="file", title="Notes", source="notes.md"),
             CombCell(type="metric", title="Count", source="stats.json", key="count"),

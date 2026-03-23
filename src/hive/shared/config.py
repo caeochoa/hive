@@ -15,7 +15,7 @@ class WorkerConfig(BaseModel):
     name: str
     worker_dir: Path
     telegram_bot_token: str
-    telegram_allowed_user_id: int
+    telegram_allowed_user_ids: list[int]
     agent_model: str = "claude-haiku-4-5"
     agent_memory_dir: str = "memory/"
     agent_max_turns: int = 10
@@ -23,6 +23,11 @@ class WorkerConfig(BaseModel):
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
     comb_theme: str = "terminal-dark"
+
+
+def _parse_allowed_ids(raw: str) -> list[int]:
+    """Parse 'id1,id2,...' or a single 'id' into a list[int]."""
+    return [int(part.strip()) for part in raw.split(",") if part.strip()]
 
 
 def load_worker_config(worker_dir: Path) -> WorkerConfig:
@@ -56,7 +61,7 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
         name=worker_section["name"],
         worker_dir=worker_dir,
         telegram_bot_token=token,
-        telegram_allowed_user_id=int(allowed_id),
+        telegram_allowed_user_ids=_parse_allowed_ids(allowed_id),
         agent_model=agent_section.get("model", "claude-haiku-4-5"),
         agent_memory_dir=agent_section.get("memory_dir", "memory/"),
         agent_max_turns=int(agent_section.get("max_turns", 10)),

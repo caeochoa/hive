@@ -29,7 +29,7 @@ def config(worker_dir: Path) -> WorkerConfig:
         name="test-worker",
         worker_dir=worker_dir,
         telegram_bot_token="fake-token",
-        telegram_allowed_user_id=12345,
+        telegram_allowed_user_ids=[12345],
         schedule=[
             ScheduleEntry(cron="0 8 * * *", run="commands/morning_brief.py"),
             ScheduleEntry(
@@ -85,7 +85,7 @@ def scheduler(
         registry=registry,
         agent=agent,
         bot=bot,
-        allowed_user_id=12345,
+        allowed_user_ids=[12345],
         auto_commit=auto_commit,
     )
 
@@ -117,7 +117,7 @@ class TestStart:
             registry=empty_reg,
             agent=agent,
             bot=bot,
-            allowed_user_id=12345,
+            allowed_user_ids=[12345],
             auto_commit=auto_commit,
         )
         sched.start()
@@ -174,7 +174,7 @@ class TestRunAgentPrompt:
         await scheduler._run_agent_prompt("Do the thing")
 
         agent.run.assert_awaited_once_with(
-            "Do the thing", chat_id=None, worker_dir=config.worker_dir
+            "Do the thing", chat_id=12345, worker_dir=config.worker_dir
         )
         bot.send_message.assert_awaited_once_with(
             chat_id=12345, text="Agent response text", parse_mode="HTML"

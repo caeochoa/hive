@@ -25,7 +25,7 @@ class TestResetHandler:
     async def test_calls_reset_session(self):
         agent = MagicMock()
         agent.reset_session = AsyncMock()
-        handler = make_reset_handler(agent, allowed_user_id=12345)
+        handler = make_reset_handler(agent, allowed_user_ids=[12345])
 
         update = _make_update(chat_id=42)
         await handler(update, MagicMock())
@@ -36,7 +36,7 @@ class TestResetHandler:
     async def test_replies_confirmation(self):
         agent = MagicMock()
         agent.reset_session = AsyncMock()
-        handler = make_reset_handler(agent, allowed_user_id=12345)
+        handler = make_reset_handler(agent, allowed_user_ids=[12345])
 
         update = _make_update()
         await handler(update, MagicMock())
@@ -51,7 +51,7 @@ class TestHelpHandler:
     async def test_shows_builtins(self):
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=12345)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[12345])
 
         update = _make_update()
         await handler(update, MagicMock())
@@ -67,7 +67,7 @@ class TestHelpHandler:
         meta.description = "Summarise recent activity"
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={"summarise": meta})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=12345)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[12345])
 
         update = _make_update()
         await handler(update, MagicMock())
@@ -80,7 +80,7 @@ class TestHelpHandler:
     async def test_no_user_commands_section_when_empty(self):
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=12345)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[12345])
 
         update = _make_update()
         await handler(update, MagicMock())
@@ -92,7 +92,7 @@ class TestHelpHandler:
     async def test_uses_markdown_parse_mode(self):
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=12345)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[12345])
 
         update = _make_update()
         await handler(update, MagicMock())
@@ -106,7 +106,7 @@ class TestResetHandlerAuth:
     async def test_ignores_disallowed_user(self):
         agent = MagicMock()
         agent.reset_session = AsyncMock()
-        handler = make_reset_handler(agent, allowed_user_id=99999)
+        handler = make_reset_handler(agent, allowed_user_ids=[99999])
 
         update = _make_update(user_id=11111)  # wrong user
         await handler(update, MagicMock())
@@ -118,7 +118,7 @@ class TestResetHandlerAuth:
     async def test_allows_correct_user(self):
         agent = MagicMock()
         agent.reset_session = AsyncMock()
-        handler = make_reset_handler(agent, allowed_user_id=99999)
+        handler = make_reset_handler(agent, allowed_user_ids=[99999])
 
         update = _make_update(user_id=99999)
         await handler(update, MagicMock())
@@ -131,7 +131,7 @@ class TestHelpHandlerAuth:
     async def test_ignores_disallowed_user(self):
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=99999)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[99999])
 
         update = _make_update(user_id=11111)  # wrong user
         await handler(update, MagicMock())
@@ -142,7 +142,7 @@ class TestHelpHandlerAuth:
     async def test_allows_correct_user(self):
         registry = MagicMock()
         type(registry).commands = PropertyMock(return_value={})
-        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_id=99999)
+        handler = make_help_handler(registry, BUILTIN_NAMES, allowed_user_ids=[99999])
 
         update = _make_update(user_id=99999)
         await handler(update, MagicMock())

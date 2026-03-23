@@ -68,7 +68,7 @@ def config(worker_dir: Path) -> WorkerConfig:
         name="test-worker",
         worker_dir=worker_dir,
         telegram_bot_token="fake-token",
-        telegram_allowed_user_id=12345,
+        telegram_allowed_user_ids=[12345],
     )
 
 
@@ -129,7 +129,7 @@ class TestDiscover:
             name="empty",
             worker_dir=tmp_path,
             telegram_bot_token="fake",
-            telegram_allowed_user_id=1,
+            telegram_allowed_user_ids=[1],
         )
         reg = CommandRegistry(config)
         reg.discover()

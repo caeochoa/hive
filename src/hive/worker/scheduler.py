@@ -27,14 +27,14 @@ class WorkerScheduler:
         registry: CommandRegistry,
         agent: AgentRunner,
         bot,
-        allowed_user_id: int,
+        allowed_user_ids: list[int],
         auto_commit: Callable[[str], Awaitable[None]],
     ) -> None:
         self._config = config
         self._registry = registry
         self._agent = agent
         self._bot = bot
-        self._allowed_user_id = allowed_user_id
+        self._allowed_user_ids = allowed_user_ids
         self._auto_commit = auto_commit
         self._scheduler = AsyncIOScheduler()
 
@@ -91,18 +91,22 @@ class WorkerScheduler:
             await self._auto_commit("scheduled command: " + meta.name)
 
     async def _run_agent_prompt(self, prompt: str) -> None:
-        """Execute a scheduled agent prompt, send the response, and auto-commit."""
+        """Execute a scheduled agent prompt for each allowed user and auto-commit."""
         logger.info("Scheduled agent prompt starting: %r", prompt[:60])
         try:
-            response = await self._agent.run(
-                prompt, chat_id=None, worker_dir=self._config.worker_dir
-            )
-            logger.info("Scheduled agent prompt complete: %d chars", len(response))
-            await send_long_message(
-                (self._bot, self._allowed_user_id),
-                md_to_telegram_html(response),
-                parse_mode="HTML",
-            )
+            for user_id in self._allowed_user_ids:
+                response = await self._agent.run(
+                    prompt, chat_id=user_id, worker_dir=self._config.worker_dir
+                )
+                logger.info(
+                    "Scheduled agent prompt complete for user %d: %d chars",
+                    user_id, len(response),
+                )
+                await send_long_message(
+                    (self._bot, user_id),
+                    md_to_telegram_html(response),
+                    parse_mode="HTML",
+                )
         finally:
             await self._auto_commit("scheduled agent prompt")
 

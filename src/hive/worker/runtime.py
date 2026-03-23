@@ -113,7 +113,7 @@ class WorkerRuntime:
             self._registry,
             self._agent,
             bot,
-            self._config.telegram_allowed_user_id,
+            self._config.telegram_allowed_user_ids,
             self._auto_commit,
         )
         self._scheduler.start()
@@ -138,7 +138,7 @@ class WorkerRuntime:
     def _is_allowed(self, update) -> bool:
         """Auth guard: return True only if user matches allowed_user_id."""
         user = update.effective_user
-        return user is not None and user.id == self._config.telegram_allowed_user_id
+        return user is not None and user.id in self._config.telegram_allowed_user_ids
 
     # ------------------------------------------------------------------ #
     # Handler registration
@@ -147,10 +147,10 @@ class WorkerRuntime:
     def _register_handlers(self) -> None:
         """Register handlers: built-ins first, user commands, then catch-all NL handler."""
         # Built-in handlers
-        reset_handler = make_reset_handler(self._agent, self._config.telegram_allowed_user_id)
-        help_handler = make_help_handler(self._registry, BUILTIN_NAMES, self._config.telegram_allowed_user_id)
-        menu_handler = make_menu_handler(self._registry, self._config.telegram_allowed_user_id)
-        callback_handler = make_callback_handler(self._registry, self._config.telegram_allowed_user_id)
+        reset_handler = make_reset_handler(self._agent, self._config.telegram_allowed_user_ids)
+        help_handler = make_help_handler(self._registry, BUILTIN_NAMES, self._config.telegram_allowed_user_ids)
+        menu_handler = make_menu_handler(self._registry, self._config.telegram_allowed_user_ids)
+        callback_handler = make_callback_handler(self._registry, self._config.telegram_allowed_user_ids)
         self._app.add_handler(CommandHandler("reset", reset_handler))
         self._app.add_handler(CommandHandler("help", help_handler))
         self._app.add_handler(CommandHandler("menu", menu_handler))

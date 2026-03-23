@@ -33,12 +33,12 @@ def _build_keyboard(registry: CommandRegistry) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows)
 
 
-def make_reset_handler(agent_runner: AgentRunner, allowed_user_id: int):
+def make_reset_handler(agent_runner: AgentRunner, allowed_user_ids: list[int]):
     """Return a /reset handler that clears the agent session."""
 
     async def handle(update, context) -> None:
         user = update.effective_user
-        if user is None or user.id != allowed_user_id:
+        if user is None or user.id not in allowed_user_ids:
             return
         chat_id = update.effective_chat.id
         await agent_runner.reset_session(chat_id)
@@ -47,12 +47,12 @@ def make_reset_handler(agent_runner: AgentRunner, allowed_user_id: int):
     return handle
 
 
-def make_help_handler(registry: CommandRegistry, builtin_names: set[str], allowed_user_id: int):
+def make_help_handler(registry: CommandRegistry, builtin_names: set[str], allowed_user_ids: list[int]):
     """Return a /help handler listing all commands with an inline keyboard."""
 
     async def handle(update, context) -> None:
         user = update.effective_user
-        if user is None or user.id != allowed_user_id:
+        if user is None or user.id not in allowed_user_ids:
             return
 
         lines = [
@@ -86,12 +86,12 @@ def make_help_handler(registry: CommandRegistry, builtin_names: set[str], allowe
     return handle
 
 
-def make_menu_handler(registry: CommandRegistry, allowed_user_id: int):
+def make_menu_handler(registry: CommandRegistry, allowed_user_ids: list[int]):
     """Return a /menu handler showing a compact inline keyboard of all commands."""
 
     async def handle(update, context) -> None:
         user = update.effective_user
-        if user is None or user.id != allowed_user_id:
+        if user is None or user.id not in allowed_user_ids:
             return
         keyboard = _build_keyboard(registry)
         if keyboard is None:
@@ -102,7 +102,7 @@ def make_menu_handler(registry: CommandRegistry, allowed_user_id: int):
     return handle
 
 
-def make_callback_handler(registry: CommandRegistry, allowed_user_id: int):
+def make_callback_handler(registry: CommandRegistry, allowed_user_ids: list[int]):
     """Return a callback handler for inline keyboard button presses."""
 
     async def handle(update, context) -> None:
@@ -111,7 +111,7 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_id: int):
 
         query = update.callback_query
         user = query.from_user
-        if user is None or user.id != allowed_user_id:
+        if user is None or user.id not in allowed_user_ids:
             await query.answer()
             return
 

@@ -9,7 +9,7 @@ def test_load_valid_config():
     config = load_worker_config(FIXTURES / "valid")
     assert config.name == "budget"
     assert config.telegram_bot_token == "test-token-123"
-    assert config.telegram_allowed_user_id == 999888
+    assert config.telegram_allowed_user_ids == [999888]
 
 
 def test_load_agent_config():

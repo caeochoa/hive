@@ -138,7 +138,7 @@ class CommandRegistry:
             update: Update, context: ContextTypes.DEFAULT_TYPE
         ) -> None:
             user = update.effective_user
-            if user is None or user.id != self._config.telegram_allowed_user_id:
+            if user is None or user.id not in self._config.telegram_allowed_user_ids:
                 return
 
             # Parse positional args from context.args
