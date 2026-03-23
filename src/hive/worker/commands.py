@@ -16,7 +16,7 @@ from telegram.ext import CommandHandler, ContextTypes
 
 from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandArg, CommandMeta
-from hive.worker.utils import md_to_telegram_html, send_long_message
+from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,8 @@ class CommandRegistry:
                 # If required and not provided, skip — script will error
 
             try:
-                result = await self.execute(meta, args)
+                async with typing_action(context.bot, update.effective_chat.id):
+                    result = await self.execute(meta, args)
                 await send_long_message(update.message, md_to_telegram_html(result or "(no output)"), parse_mode="HTML")  # type: ignore[union-attr]
             except CommandError as exc:
                 await send_long_message(update.message, f"Error: {exc.stderr}", parse_mode="HTML")  # type: ignore[union-attr]

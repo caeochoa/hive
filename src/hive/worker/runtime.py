@@ -21,7 +21,7 @@ from hive.worker.builtins import (
 )
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import ClaudeAgentRunner
-from hive.worker.utils import send_long_message, md_to_telegram_html
+from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
 
 if TYPE_CHECKING:
     from telegram import Update
@@ -182,11 +182,12 @@ class WorkerRuntime:
         if not self._is_allowed(update):
             return
         try:
-            response = await self._agent.run(
-                update.message.text,
-                update.effective_chat.id,
-                self._config.worker_dir,
-            )
+            async with typing_action(context.bot, update.effective_chat.id):
+                response = await self._agent.run(
+                    update.message.text,
+                    update.effective_chat.id,
+                    self._config.worker_dir,
+                )
             await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
         except Exception:
             logger.exception("Agent error")

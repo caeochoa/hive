@@ -2,8 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
+from contextlib import asynccontextmanager, suppress
+
+
+@asynccontextmanager
+async def typing_action(bot, chat_id: int):
+    """Periodically send typing action until the context exits."""
+
+    async def _keep_typing():
+        while True:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            await asyncio.sleep(4)  # refresh before Telegram's ~5s expiry
+
+    task = asyncio.create_task(_keep_typing())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def md_to_telegram_html(text: str) -> str:

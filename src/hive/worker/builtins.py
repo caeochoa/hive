@@ -107,7 +107,7 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_id: int):
 
     async def handle(update, context) -> None:
         from hive.worker.commands import CommandError
-        from hive.worker.utils import send_long_message, md_to_telegram_html
+        from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
 
         query = update.callback_query
         user = query.from_user
@@ -126,7 +126,8 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_id: int):
                 return
             args = {a.name: a.default for a in meta.args if a.default is not None}
             try:
-                result = await registry.execute(meta, args)
+                async with typing_action(context.bot, query.message.chat_id):
+                    result = await registry.execute(meta, args)
                 text = result or "(no output)"
                 if meta.args:
                     defaults_str = " ".join(str(a.default) for a in meta.args if a.default is not None)
