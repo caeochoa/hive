@@ -61,7 +61,7 @@ Edit `my-bot/.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=your_token_here
-TELEGRAM_ALLOWED_USER_ID=your_telegram_user_id
+TELEGRAM_ALLOWED_USER_ID=your_telegram_user_id   # comma-separate for multiple: 12345,67890
 ```
 
 The `.env` file is git-ignored and never committed.
@@ -238,9 +238,19 @@ Each `hive run <path>` process runs a single async event loop that:
 3. Executes scheduled tasks (APScheduler)
 4. Auto-commits any file writes to the Worker's git repo
 
+While a command or agent turn is processing, a typing indicator is shown in the Telegram chat.
+
+**Built-in commands** (always registered, no scripts required):
+
+| Command | Description |
+|---------|-------------|
+| `/help` | List all available commands with descriptions |
+| `/menu` | Inline keyboard launcher — tap to run any command |
+| `/reset` | Start a fresh conversation (clears agent session) |
+
 supervisord's `autorestart=true` handles crash recovery. On macOS, a LaunchAgent starts supervisord at login.
 
-For full design details see [`docs/plans/SPEC.md`](docs/plans/SPEC.md).
+For full design details see [`docs/reference/SPEC.md`](docs/reference/SPEC.md).
 
 ---
 

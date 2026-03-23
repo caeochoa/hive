@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Hive** is a local-first framework for spinning up purpose-built Telegram bots called **Workers**. The central philosophy is **one folder = one world**: a Worker folder contains all its config, scripts, memory, and logs; Hive provides the shared infrastructure that runs them.
 
 Key docs:
-- `docs/plans/SPEC.md` — evergreen scope document: what Hive is, vocabulary, components, and design decisions
-- `docs/plans/2026-03-09-hive-architecture-design.md` — concrete implementation detail: data flows, config schemas, CLI contract, supervisord setup
+- `docs/reference/SPEC.md` — evergreen scope document: what Hive is, vocabulary, components, and design decisions
+- `docs/reference/architecture.md` — concrete implementation detail: data flows, config schemas, CLI contract, supervisord setup
 
 ## Development Commands
 
@@ -107,7 +107,7 @@ Secrets live in `.env` per Worker (git-ignored). Hive loads `.env` at startup.
 
 ```
 TELEGRAM_BOT_TOKEN=...
-TELEGRAM_ALLOWED_USER_ID=...
+TELEGRAM_ALLOWED_USER_ID=...        # single user; comma-separate for multiple: 12345,67890
 ```
 
 `hive.toml` contains no secrets and is safe to commit.
@@ -167,3 +167,16 @@ MVP cell types:
 | `hive status` | `supervisorctl status` for all Workers |
 | `hive logs <path>` | Tail Worker logs (`-n <lines>`, `-f` to follow) |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |
+
+## Key Entry Points
+
+| What you want to understand | File | Where to start |
+|---|---|---|
+| All CLI commands | `src/hive/cli/app.py` | Top-level Typer commands |
+| Worker boot sequence | `src/hive/worker/runtime.py` | `WorkerRuntime.start()` |
+| Message routing (command vs NL) | `src/hive/worker/runtime.py` | `_handle_nl_message()`, `_register_handlers()` |
+| Command discovery & execution | `src/hive/worker/commands.py` | `CommandRegistry.discover()` |
+| Agent SDK integration | `src/hive/worker/agent.py` | `ClaudeAgentRunner.run()` |
+| Built-in commands (/reset, /help, /menu) | `src/hive/worker/builtins.py` | `make_*_handler()` functions |
+| All Pydantic data models | `src/hive/shared/models.py` | Top of file |
+| Worker utilities (typing, formatting) | `src/hive/worker/utils.py` | `docs/guides/worker-internals.md` |
