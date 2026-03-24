@@ -38,6 +38,23 @@ def _make_runtime(tmp_path: Path) -> WorkerRuntime:
 # ------------------------------------------------------------------ #
 
 
+class TestBuildSystemPrompt:
+    def test_default_prompt_includes_self_config_instructions(self, tmp_path):
+        """When agent_system_prompt is not set, self-config instructions are appended."""
+        rt = _make_runtime(tmp_path)
+        prompt = rt._build_system_prompt()
+        assert "hive.toml" in prompt
+        assert "set_session_config" in prompt
+
+    def test_custom_prompt_used_as_is(self, tmp_path):
+        """When agent_system_prompt is set, it is used verbatim without self-config instructions."""
+        rt = _make_runtime(tmp_path)
+        rt._config = SimpleNamespace(**{**rt._config.__dict__, "agent_system_prompt": "My custom prompt."})
+        prompt = rt._build_system_prompt()
+        assert prompt == "My custom prompt."
+        assert "hive.toml" not in prompt
+
+
 class TestSchedulerLifecycle:
     async def test_start_does_not_await_scheduler(self, tmp_path):
         """Scheduler.start/stop must be callable without await from runtime."""
@@ -397,6 +414,33 @@ class TestHandleNlMessageWithRestart:
         rt._app.bot.send_message.assert_awaited_once()
         sent_text = rt._app.bot.send_message.call_args.kwargs.get("text", "")
         assert "Restarting" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_no_restart_on_agent_error_even_if_files_changed(self, tmp_path):
+        """Config change detected after an agent error must NOT trigger restart."""
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+        rt._agent.run = AsyncMock(side_effect=RuntimeError("agent blew up"))
+        rt._app = MagicMock()
+        rt._app.bot.send_message = AsyncMock()
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+        update.message.reply_text = AsyncMock()
+
+        before_snap = {tmp_path / "hive.toml": 1000}
+        after_snap = {tmp_path / "hive.toml": 2000}  # config changed mid-error
+
+        with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+            with patch.object(rt, "_snapshot_worker_paths", side_effect=[before_snap, after_snap]):
+                with patch.object(rt, "_delayed_restart", new_callable=AsyncMock) as mock_restart:
+                    await rt._handle_nl_message(update, MagicMock())
+
+        # No restart message, no restart scheduled
+        rt._app.bot.send_message.assert_not_awaited()
+        mock_restart.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_restart_when_files_unchanged(self, tmp_path):

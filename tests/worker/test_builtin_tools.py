@@ -21,14 +21,6 @@ def _make_runner():
     return runner
 
 
-def _extract_handler(server_dict: dict):
-    """Pull the set_session_config handler function out of the MCP server dict."""
-    instance = server_dict["instance"]
-    # The mcp Server stores registered tools; reach in via its internal registry.
-    # Fallback: re-import the handler from the module under test.
-    return None  # we test via the module-level handler directly
-
-
 # ------------------------------------------------------------------ #
 # build_builtin_mcp_server
 # ------------------------------------------------------------------ #

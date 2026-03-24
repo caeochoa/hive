@@ -538,6 +538,25 @@ def test_set_session_override_multiple_keys(runner):
     assert runner._session_overrides[42] == {"model": "claude-opus-4-6", "max_turns": 20}
 
 
+def test_set_session_override_merges_sequential_calls(runner):
+    """Sequential calls accumulate overrides rather than replacing them."""
+    runner.set_session_override(42, model="claude-opus-4-6")
+    runner.set_session_override(42, max_turns=20)
+    assert runner._session_overrides[42] == {"model": "claude-opus-4-6", "max_turns": 20}
+
+
+# ------------------------------------------------------------------ #
+# set_builtins_mcp setter
+# ------------------------------------------------------------------ #
+
+
+def test_set_builtins_mcp_stores_server(runner):
+    """set_builtins_mcp() assigns to _builtins_mcp (no private attr mutation)."""
+    server = object()
+    runner.set_builtins_mcp(server)
+    assert runner._builtins_mcp is server
+
+
 def test_clear_session_override_removes_state(runner):
     runner.set_session_override(42, model="claude-opus-4-6")
     runner.clear_session_override(42)

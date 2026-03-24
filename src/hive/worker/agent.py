@@ -149,7 +149,7 @@ class ClaudeAgentRunner(AgentRunner):
 
     def set_session_override(self, chat_id: int, **kwargs: Any) -> None:
         """Store per-session config overrides; client will be recreated on next turn."""
-        self._session_overrides[chat_id] = kwargs
+        self._session_overrides.setdefault(chat_id, {}).update(kwargs)
         self._pending_override_reset.add(chat_id)
         logger.info("Session override set for chat_id=%d: %r", chat_id, kwargs)
 
@@ -157,6 +157,10 @@ class ClaudeAgentRunner(AgentRunner):
         """Remove all session overrides for a chat."""
         self._session_overrides.pop(chat_id, None)
         self._pending_override_reset.discard(chat_id)
+
+    def set_builtins_mcp(self, server: Any) -> None:
+        """Attach the built-in MCP server after construction."""
+        self._builtins_mcp = server
 
     # ------------------------------------------------------------------ #
     # Client management

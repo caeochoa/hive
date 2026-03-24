@@ -217,6 +217,12 @@ def make_set_handler(agent_runner: ClaudeAgentRunner, allowed_user_ids: list[int
                 return
         else:
             parsed_value = value
+            if key == "model" and not value.startswith("claude-"):
+                await update.message.reply_text(
+                    f"Invalid model ID <code>{value}</code>. Model must start with <code>claude-</code>.",
+                    parse_mode="HTML",
+                )
+                return
 
         agent_runner.set_session_override(chat_id, **{key: parsed_value})
         await update.message.reply_text(

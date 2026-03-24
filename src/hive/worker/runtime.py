@@ -24,6 +24,7 @@ from hive.worker.builtins import (
 )
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import ClaudeAgentRunner
+from hive.worker.builtin_tools import build_builtin_mcp_server
 from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
 
 if TYPE_CHECKING:
@@ -44,6 +45,7 @@ class WorkerRuntime:
         self._app = None
         self._shutdown_event: asyncio.Event | None = None
         self._commit_lock = asyncio.Lock()
+        self._restart_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ #
     # Top-level lifecycle
@@ -61,6 +63,21 @@ class WorkerRuntime:
         finally:
             await self.stop()
 
+    def _build_system_prompt(self) -> str:
+        """Build the agent system prompt, appending self-config instructions only when no custom prompt is set."""
+        if self._config.agent_system_prompt:
+            return self._config.agent_system_prompt
+        return (
+            "You are a worker agent. Your world is this folder."
+            "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
+            "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
+            "After any such changes, the worker will automatically restart to apply them; "
+            "your conversation session persists across restarts."
+            "\n\nYou also have a set_session_config tool to temporarily override model, "
+            "max_turns, or thinking_budget_tokens for the current conversation. "
+            "These overrides reset on /reset or worker restart."
+        )
+
     async def start(self) -> None:
         """Full startup sequence.
 
@@ -76,23 +93,9 @@ class WorkerRuntime:
         commands_mcp = self._registry.build_mcp_server()
         command_names = list(self._registry._commands) if commands_mcp is not None else []
 
-        base_prompt = (
-            self._config.agent_system_prompt
-            or "You are a worker agent. Your world is this folder."
-        )
-        system_prompt = (
-            base_prompt
-            + "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
-            "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
-            "After any such changes, the worker will automatically restart to apply them; "
-            "your conversation session persists across restarts."
-            "\n\nYou also have a set_session_config tool to temporarily override model, "
-            "max_turns, or thinking_budget_tokens for the current conversation. "
-            "These overrides reset on /reset or worker restart."
-        )
         agent_config = SimpleNamespace(
             model=self._config.agent_model,
-            system_prompt=system_prompt,
+            system_prompt=self._build_system_prompt(),
             max_turns=self._config.agent_max_turns,
             memory_dir=self._config.agent_memory_dir,
             thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
@@ -104,8 +107,7 @@ class WorkerRuntime:
             agent_config, commands_mcp, command_names, sessions_file, self._config.worker_dir
         )
 
-        from hive.worker.builtin_tools import build_builtin_mcp_server
-        self._agent._builtins_mcp = build_builtin_mcp_server(self._agent)
+        self._agent.set_builtins_mcp(build_builtin_mcp_server(self._agent))
 
         self._app = ApplicationBuilder().token(self._config.telegram_bot_token).build()
         self._register_handlers()
@@ -201,7 +203,12 @@ class WorkerRuntime:
     # ------------------------------------------------------------------ #
 
     def _snapshot_worker_paths(self) -> dict[Path, int]:
-        """Return mtime_ns for hive.toml and all commands/*.py files."""
+        """Return mtime_ns for hive.toml and all commands/*.py files.
+
+        Note: change detection is only wired into _handle_nl_message (interactive turns).
+        Scheduled agent_prompt tasks intentionally skip it to avoid unattended restarts
+        mid-schedule — supervisord will restart with updated config on the next interactive turn.
+        """
         paths: dict[Path, int] = {}
         toml = self._config.worker_dir / "hive.toml"
         if toml.exists():
@@ -245,18 +252,18 @@ class WorkerRuntime:
                     self._config.worker_dir,
                 )
             await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
+
+            after = self._snapshot_worker_paths()
+            if self._detect_worker_changes(before, after):
+                logger.info("Worker config files changed — scheduling restart")
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text="Config updated. Restarting worker to apply changes...",
+                )
+                self._restart_task = asyncio.create_task(self._delayed_restart())
         except Exception:
             logger.exception("Agent error")
             await update.message.reply_text("Something went wrong. Check the logs.")
-
-        after = self._snapshot_worker_paths()
-        if self._detect_worker_changes(before, after):
-            logger.info("Worker config files changed — scheduling restart")
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text="Config updated. Restarting worker to apply changes...",
-            )
-            asyncio.create_task(self._delayed_restart())
 
         await self._auto_commit("agent turn")
 
