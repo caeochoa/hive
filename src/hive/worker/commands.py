@@ -103,7 +103,7 @@ class CommandRegistry:
                 if value:
                     cmd_args.append(f"--{arg_def.name}")
             else:
-                cmd_args.append(str(value))
+                cmd_args.extend([f"--{arg_def.name}", str(value)])
 
         logger.debug("Subprocess args: %r", cmd_args)
         env = {**os.environ, "WORKER_DIR": str(self._config.worker_dir)}

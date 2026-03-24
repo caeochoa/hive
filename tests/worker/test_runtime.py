@@ -189,8 +189,8 @@ class TestRegisterHandlers:
 
         rt._register_handlers()
 
-        # 2 built-ins + 2 user commands + 1 catch-all NL handler = 5
-        assert rt._app.add_handler.call_count == 5
+        # 4 built-ins (reset, help, menu, callback) + 2 user commands + 1 catch-all NL handler = 7
+        assert rt._app.add_handler.call_count == 7
 
     def test_skips_colliding_commands(self, tmp_path):
         rt = _make_runtime(tmp_path)
@@ -209,8 +209,8 @@ class TestRegisterHandlers:
 
         rt._register_handlers()
 
-        # 2 built-ins + 1 user command (colliding skipped) + 1 catch-all = 4
-        assert rt._app.add_handler.call_count == 4
+        # 4 built-ins (reset, help, menu, callback) + 1 user command (colliding skipped) + 1 catch-all = 6
+        assert rt._app.add_handler.call_count == 6
 
 
 # ------------------------------------------------------------------ #

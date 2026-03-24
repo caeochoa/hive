@@ -98,7 +98,7 @@ class TestHelpHandler:
         await handler(update, MagicMock())
 
         kwargs = update.message.reply_text.call_args[1]
-        assert kwargs.get("parse_mode") == "Markdown"
+        assert kwargs.get("parse_mode") == "HTML"
 
 
 class TestResetHandlerAuth:

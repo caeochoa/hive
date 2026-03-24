@@ -147,6 +147,7 @@ class TestExecute:
             name="test",
             description="test cmd",
             script_path="/fake/script.py",
+            args=[CommandArg(name="key", type="str", description="a key")],
         )
 
         mock_proc = AsyncMock()
