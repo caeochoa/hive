@@ -491,3 +491,257 @@ async def test_thinking_kwarg_passed_when_set(agent_config, commands_mcp, sessio
         await r._run_one_shot("test")
 
     assert options_kwargs.get("thinking") == {"type": "enabled", "budget_tokens": 5000}
+
+
+# ------------------------------------------------------------------ #
+# _close_client helper
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_close_client_removes_client_and_stack(runner):
+    """_close_client removes both client and exit stack without touching sessions."""
+    runner._sessions[7] = {"chat_id": 7, "session_id": "s7"}
+    runner._clients[7] = MagicMock()
+    mock_stack = AsyncMock()
+    runner._exit_stacks[7] = mock_stack
+
+    await runner._close_client(7)
+
+    mock_stack.aclose.assert_awaited_once()
+    assert 7 not in runner._clients
+    assert 7 not in runner._exit_stacks
+    # Session data is preserved
+    assert 7 in runner._sessions
+
+
+@pytest.mark.asyncio
+async def test_close_client_noop_when_no_client(runner):
+    """_close_client is a no-op when there is no active client."""
+    # Should not raise
+    await runner._close_client(999)
+
+
+# ------------------------------------------------------------------ #
+# Session overrides
+# ------------------------------------------------------------------ #
+
+
+def test_set_session_override_stores_override(runner):
+    runner.set_session_override(42, model="claude-opus-4-6")
+    assert runner._session_overrides[42] == {"model": "claude-opus-4-6"}
+    assert 42 in runner._pending_override_reset
+
+
+def test_set_session_override_multiple_keys(runner):
+    runner.set_session_override(42, model="claude-opus-4-6", max_turns=20)
+    assert runner._session_overrides[42] == {"model": "claude-opus-4-6", "max_turns": 20}
+
+
+def test_clear_session_override_removes_state(runner):
+    runner.set_session_override(42, model="claude-opus-4-6")
+    runner.clear_session_override(42)
+    assert 42 not in runner._session_overrides
+    assert 42 not in runner._pending_override_reset
+
+
+def test_clear_session_override_noop_when_absent(runner):
+    # Should not raise
+    runner.clear_session_override(999)
+
+
+@pytest.mark.asyncio
+async def test_reset_session_clears_overrides(runner, sessions_file):
+    runner._sessions[5] = {"chat_id": 5, "session_id": "s5"}
+    runner._clients[5] = MagicMock()
+    runner._locks[5] = asyncio.Lock()
+    runner._exit_stacks[5] = AsyncMock()
+    runner.set_session_override(5, model="claude-opus-4-6")
+
+    await runner.reset_session(5)
+
+    assert 5 not in runner._session_overrides
+    assert 5 not in runner._pending_override_reset
+
+
+# ------------------------------------------------------------------ #
+# _get_or_create_client merges overrides
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_client_merges_model_override(runner):
+    """Session model override replaces the config model in ClaudeAgentOptions."""
+    runner.set_session_override(42, model="claude-opus-4-6")
+    # Clear pending reset so _get_or_create_client is called (not skipped)
+    runner._pending_override_reset.discard(42)
+
+    options_kwargs: dict = {}
+
+    def capture(**kwargs):
+        options_kwargs.update(kwargs)
+        return MagicMock()
+
+    DummyMsg = type("DummyMsg", (), {})
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(side_effect=capture),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=DummyMsg,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=DummyMsg,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner._get_or_create_client(42)
+
+    assert options_kwargs.get("model") == "claude-opus-4-6"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_client_merges_thinking_override(runner):
+    """thinking_budget_tokens override is converted to the nested thinking dict."""
+    runner.set_session_override(42, thinking_budget_tokens=3000)
+    runner._pending_override_reset.discard(42)
+
+    options_kwargs: dict = {}
+
+    def capture(**kwargs):
+        options_kwargs.update(kwargs)
+        return MagicMock()
+
+    DummyMsg = type("DummyMsg", (), {})
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(side_effect=capture),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=DummyMsg,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=DummyMsg,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner._get_or_create_client(42)
+
+    assert options_kwargs.get("thinking") == {"type": "enabled", "budget_tokens": 3000}
+    assert "thinking_budget_tokens" not in options_kwargs
+
+
+# ------------------------------------------------------------------ #
+# _run_interactive: pending override reset closes stale client
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_pending_override_reset_closes_stale_client(runner, worker_dir):
+    """When _pending_override_reset contains chat_id, the old client is closed first."""
+    # Pre-install a fake client and exit stack
+    mock_stack = AsyncMock()
+    runner._exit_stacks[42] = mock_stack
+    runner._clients[42] = MagicMock()
+    runner._pending_override_reset.add(42)
+
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    ResultMessage = type("ResultMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "reply"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+    result_msg = ResultMessage()
+    result_msg.session_id = "new-sess"
+    result_msg.num_turns = 1
+    result_msg.total_cost_usd = None
+    result_msg.stop_reason = "end_turn"
+    result_msg.usage = None
+
+    async def mock_receive():
+        yield assistant_msg
+        yield result_msg
+
+    new_client = AsyncMock()
+    new_client.__aenter__ = AsyncMock(return_value=new_client)
+    new_client.__aexit__ = AsyncMock(return_value=False)
+    new_client.receive_response = MagicMock(return_value=mock_receive())
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=new_client),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=ResultMessage,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner._run_interactive("hello", 42)
+
+    # Old exit stack should have been closed
+    mock_stack.aclose.assert_awaited_once()
+    # pending_override_reset cleared
+    assert 42 not in runner._pending_override_reset
+
+
+@pytest.mark.asyncio
+async def test_contextvar_set_during_run_interactive(runner, worker_dir):
+    """_current_chat_id ContextVar holds the correct chat_id during a turn."""
+    from hive.worker.agent import _current_chat_id
+
+    captured_chat_id = []
+
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    ResultMessage = type("ResultMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "hi"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+    result_msg = ResultMessage()
+    result_msg.session_id = "sess-cv"
+    result_msg.num_turns = 1
+    result_msg.total_cost_usd = None
+    result_msg.stop_reason = "end_turn"
+    result_msg.usage = None
+
+    async def mock_receive():
+        # Capture the ContextVar value mid-turn
+        captured_chat_id.append(_current_chat_id.get())
+        yield assistant_msg
+        yield result_msg
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.receive_response = MagicMock(return_value=mock_receive())
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=mock_client),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=ResultMessage,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner._run_interactive("hello", 77)
+
+    assert captured_chat_id == [77]
+    # ContextVar reset after the turn
+    assert _current_chat_id.get() is None

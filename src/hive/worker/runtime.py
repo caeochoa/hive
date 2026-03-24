@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -18,6 +20,7 @@ from hive.worker.builtins import (
     make_help_handler,
     make_menu_handler,
     make_reset_handler,
+    make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
 from hive.worker.agent import ClaudeAgentRunner
@@ -73,10 +76,23 @@ class WorkerRuntime:
         commands_mcp = self._registry.build_mcp_server()
         command_names = list(self._registry._commands) if commands_mcp is not None else []
 
+        base_prompt = (
+            self._config.agent_system_prompt
+            or "You are a worker agent. Your world is this folder."
+        )
+        system_prompt = (
+            base_prompt
+            + "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
+            "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
+            "After any such changes, the worker will automatically restart to apply them; "
+            "your conversation session persists across restarts."
+            "\n\nYou also have a set_session_config tool to temporarily override model, "
+            "max_turns, or thinking_budget_tokens for the current conversation. "
+            "These overrides reset on /reset or worker restart."
+        )
         agent_config = SimpleNamespace(
             model=self._config.agent_model,
-            system_prompt=self._config.agent_system_prompt
-            or "You are a worker agent. Your world is this folder.",
+            system_prompt=system_prompt,
             max_turns=self._config.agent_max_turns,
             memory_dir=self._config.agent_memory_dir,
             thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
@@ -87,6 +103,9 @@ class WorkerRuntime:
         self._agent = ClaudeAgentRunner(
             agent_config, commands_mcp, command_names, sessions_file, self._config.worker_dir
         )
+
+        from hive.worker.builtin_tools import build_builtin_mcp_server
+        self._agent._builtins_mcp = build_builtin_mcp_server(self._agent)
 
         self._app = ApplicationBuilder().token(self._config.telegram_bot_token).build()
         self._register_handlers()
@@ -99,6 +118,7 @@ class WorkerRuntime:
             BotCommand("reset", "Start a fresh conversation"),
             BotCommand("help", "Show available commands"),
             BotCommand("menu", "Quick command launcher"),
+            BotCommand("set", "Override session config (model, max_turns, ...)"),
         ] + [
             BotCommand(m.name, m.description[:255])
             for m in self._registry.commands.values()
@@ -152,9 +172,11 @@ class WorkerRuntime:
         help_handler = make_help_handler(self._registry, BUILTIN_NAMES, self._config.telegram_allowed_user_ids)
         menu_handler = make_menu_handler(self._registry, self._config.telegram_allowed_user_ids)
         callback_handler = make_callback_handler(self._registry, self._config.telegram_allowed_user_ids)
+        set_handler = make_set_handler(self._agent, self._config.telegram_allowed_user_ids)
         self._app.add_handler(CommandHandler("reset", reset_handler))
         self._app.add_handler(CommandHandler("help", help_handler))
         self._app.add_handler(CommandHandler("menu", menu_handler))
+        self._app.add_handler(CommandHandler("set", set_handler))
         self._app.add_handler(CallbackQueryHandler(callback_handler))
 
         # User command handlers (warn on collision with built-ins)
@@ -175,24 +197,67 @@ class WorkerRuntime:
         )
 
     # ------------------------------------------------------------------ #
+    # Config change detection and self-restart
+    # ------------------------------------------------------------------ #
+
+    def _snapshot_worker_paths(self) -> dict[Path, int]:
+        """Return mtime_ns for hive.toml and all commands/*.py files."""
+        paths: dict[Path, int] = {}
+        toml = self._config.worker_dir / "hive.toml"
+        if toml.exists():
+            paths[toml] = toml.stat().st_mtime_ns
+        commands_dir = self._config.worker_dir / "commands"
+        if commands_dir.is_dir():
+            for p in commands_dir.glob("*.py"):
+                paths[p] = p.stat().st_mtime_ns
+        return paths
+
+    @staticmethod
+    def _detect_worker_changes(before: dict[Path, int], after: dict[Path, int]) -> bool:
+        """Return True if any path was added, removed, or modified."""
+        if set(before) != set(after):
+            return True
+        return any(before[p] != after[p] for p in before)
+
+    async def _delayed_restart(self, delay: float = 1.5) -> None:
+        """Sleep briefly then send SIGTERM; supervisord will restart the process."""
+        await asyncio.sleep(delay)
+        logger.info("Sending SIGTERM for self-restart after config change")
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    # ------------------------------------------------------------------ #
     # Natural language handler
     # ------------------------------------------------------------------ #
 
     async def _handle_nl_message(self, update, context) -> None:
-        """Route NL messages to agent, reply, auto-commit."""
+        """Route NL messages to agent, reply, auto-commit, and restart if config changed."""
         if not self._is_allowed(update):
             return
+
+        chat_id = update.effective_chat.id
+        before = self._snapshot_worker_paths()
+
         try:
-            async with typing_action(context.bot, update.effective_chat.id):
+            async with typing_action(context.bot, chat_id):
                 response = await self._agent.run(
                     update.message.text,
-                    update.effective_chat.id,
+                    chat_id,
                     self._config.worker_dir,
                 )
             await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
         except Exception:
             logger.exception("Agent error")
             await update.message.reply_text("Something went wrong. Check the logs.")
+
+        after = self._snapshot_worker_paths()
+        if self._detect_worker_changes(before, after):
+            logger.info("Worker config files changed — scheduling restart")
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text="Config updated. Restarting worker to apply changes...",
+            )
+            asyncio.create_task(self._delayed_restart())
+
         await self._auto_commit("agent turn")
 
     # ------------------------------------------------------------------ #

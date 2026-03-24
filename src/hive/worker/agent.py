@@ -8,12 +8,16 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from hive.shared.models import AgentSession
 
 logger = logging.getLogger(__name__)
+
+# ContextVar set by _run_interactive so builtin MCP tools can identify the caller.
+_current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
 
 
 class AgentRunner(ABC):
@@ -49,6 +53,12 @@ class ClaudeAgentRunner(AgentRunner):
         self._clients: dict[int, Any] = {}
         self._exit_stacks: dict[int, AsyncExitStack] = {}
         self._locks: dict[int, asyncio.Lock] = {}
+
+        # Session-specific config overrides (in-memory, cleared on /reset or restart).
+        self._session_overrides: dict[int, dict[str, Any]] = {}
+        self._pending_override_reset: set[int] = set()
+        # Set post-init by WorkerRuntime after the runner is constructed.
+        self._builtins_mcp: Any = None
 
         self._load_sessions()
 
@@ -134,8 +144,42 @@ class ClaudeAgentRunner(AgentRunner):
                 logger.debug("[result] usage=%r", msg.usage)
 
     # ------------------------------------------------------------------ #
+    # Session overrides
+    # ------------------------------------------------------------------ #
+
+    def set_session_override(self, chat_id: int, **kwargs: Any) -> None:
+        """Store per-session config overrides; client will be recreated on next turn."""
+        self._session_overrides[chat_id] = kwargs
+        self._pending_override_reset.add(chat_id)
+        logger.info("Session override set for chat_id=%d: %r", chat_id, kwargs)
+
+    def clear_session_override(self, chat_id: int) -> None:
+        """Remove all session overrides for a chat."""
+        self._session_overrides.pop(chat_id, None)
+        self._pending_override_reset.discard(chat_id)
+
+    # ------------------------------------------------------------------ #
     # Client management
     # ------------------------------------------------------------------ #
+
+    async def _close_client(self, chat_id: int) -> None:
+        """Close and remove the client for chat_id without wiping session data."""
+        if chat_id in self._exit_stacks:
+            try:
+                await self._exit_stacks[chat_id].aclose()
+            except Exception:
+                logger.warning("Error closing client for chat_id=%d", chat_id, exc_info=True)
+            del self._exit_stacks[chat_id]
+        self._clients.pop(chat_id, None)
+
+    def _build_mcp_servers(self) -> dict[str, Any]:
+        """Return the MCP servers dict for ClaudeAgentOptions."""
+        servers: dict[str, Any] = {}
+        if self._commands_mcp is not None:
+            servers["commands"] = self._commands_mcp
+        if self._builtins_mcp is not None:
+            servers["builtins"] = self._builtins_mcp
+        return servers
 
     async def _get_or_create_client(self, chat_id: int) -> Any:
         """Lazily create and cache a ClaudeSDKClient for this chat_id."""
@@ -152,21 +196,34 @@ class ClaudeAgentRunner(AgentRunner):
                 logger.info("Creating new client for chat_id=%d", chat_id)
 
             thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
-            options = ClaudeAgentOptions(
-                system_prompt=getattr(
+            base_kwargs: dict[str, Any] = {
+                "system_prompt": getattr(
                     self._config,
                     "system_prompt",
                     "You are a worker agent. Your world is this folder.",
                 ),
-                allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
-                permission_mode="bypassPermissions",
-                cwd=str(self._worker_dir),
-                mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
-                model=self._config.model,
-                max_turns=self._config.max_turns,
-                **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
-                   if thinking_budget is not None else {}),
-            )
+                "allowed_tools": [
+                    "Read", "Write", "Bash", "Glob",
+                    *self._command_names,
+                    *(["set_session_config"] if self._builtins_mcp is not None else []),
+                ],
+                "permission_mode": "bypassPermissions",
+                "cwd": str(self._worker_dir),
+                "mcp_servers": self._build_mcp_servers(),
+                "model": self._config.model,
+                "max_turns": self._config.max_turns,
+            }
+            if thinking_budget is not None:
+                base_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+
+            # Merge session-specific overrides (e.g. model, max_turns).
+            overrides = dict(self._session_overrides.get(chat_id, {}))
+            if "thinking_budget_tokens" in overrides:
+                budget = overrides.pop("thinking_budget_tokens")
+                overrides["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            base_kwargs.update(overrides)
+
+            options = ClaudeAgentOptions(**base_kwargs)
 
             client = ClaudeSDKClient(options)
             if session_id:
@@ -233,25 +290,37 @@ class ClaudeAgentRunner(AgentRunner):
 
         lock = self._get_lock(chat_id)
         async with lock:
+            # If overrides changed since last turn, close the stale client so
+            # _get_or_create_client rebuilds it with the new options.
+            if chat_id in self._pending_override_reset and chat_id in self._clients:
+                await self._close_client(chat_id)
+                self._pending_override_reset.discard(chat_id)
+
             logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
             t0 = time.monotonic()
-            client = await self._get_or_create_client(chat_id)
-            await client.query(message)
 
-            parts: list[str] = []
-            async for msg in client.receive_response():
-                self._log_sdk_message(msg)
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            parts.append(block.text)
-                elif isinstance(msg, ResultMessage):
-                    if msg.session_id:
-                        self._sessions[chat_id] = {
-                            "chat_id": chat_id,
-                            "session_id": msg.session_id,
-                        }
-                        logger.debug("Session updated for chat_id=%d", chat_id)
+            # Set ContextVar so builtin MCP tool handlers can identify this session.
+            token = _current_chat_id.set(chat_id)
+            try:
+                client = await self._get_or_create_client(chat_id)
+                await client.query(message)
+
+                parts: list[str] = []
+                async for msg in client.receive_response():
+                    self._log_sdk_message(msg)
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                parts.append(block.text)
+                    elif isinstance(msg, ResultMessage):
+                        if msg.session_id:
+                            self._sessions[chat_id] = {
+                                "chat_id": chat_id,
+                                "session_id": msg.session_id,
+                            }
+                            logger.debug("Session updated for chat_id=%d", chat_id)
+            finally:
+                _current_chat_id.reset(token)
 
             elapsed = time.monotonic() - t0
             response = "".join(parts)
@@ -264,13 +333,11 @@ class ClaudeAgentRunner(AgentRunner):
     # ------------------------------------------------------------------ #
 
     async def reset_session(self, chat_id: int) -> None:
-        """Close the client stack, clear session data, and save."""
-        if chat_id in self._exit_stacks:
-            await self._exit_stacks[chat_id].aclose()
-            del self._exit_stacks[chat_id]
-        self._clients.pop(chat_id, None)
+        """Close the client stack, clear session data and overrides, and save."""
+        await self._close_client(chat_id)
         self._sessions.pop(chat_id, None)
         self._locks.pop(chat_id, None)
+        self.clear_session_override(chat_id)
         self._save_sessions()
 
     async def close(self) -> None:

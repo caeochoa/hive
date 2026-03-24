@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 if TYPE_CHECKING:
-    from hive.worker.agent import AgentRunner
+    from hive.worker.agent import AgentRunner, ClaudeAgentRunner
     from hive.worker.commands import CommandRegistry
     from hive.shared.models import CommandMeta
 
-BUILTIN_NAMES: set[str] = {"reset", "help", "menu"}
+BUILTIN_NAMES: set[str] = {"reset", "help", "menu", "set"}
 
 
 def _is_executable(meta: CommandMeta) -> bool:
@@ -151,5 +151,78 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_ids: list[int]
                 f"<b>/{meta.name}</b> \u2014 {meta.description}\n\nUsage: <code>{usage}</code>",
                 parse_mode="HTML",
             )
+
+    return handle
+
+
+_SET_USAGE = (
+    "<b>/set</b> \u2014 Override session config for this conversation.\n\n"
+    "<b>Usage:</b>\n"
+    "  <code>/set model &lt;model-id&gt;</code> \u2014 e.g. claude-opus-4-6\n"
+    "  <code>/set max_turns &lt;n&gt;</code>\n"
+    "  <code>/set thinking_budget_tokens &lt;n&gt;</code>\n"
+    "  <code>/set reset</code> \u2014 clear all overrides\n\n"
+    "Overrides reset on /reset or worker restart."
+)
+
+_VALID_INT_KEYS = {"max_turns", "thinking_budget_tokens"}
+_VALID_STR_KEYS = {"model"}
+_VALID_KEYS = _VALID_INT_KEYS | _VALID_STR_KEYS
+
+
+def make_set_handler(agent_runner: ClaudeAgentRunner, allowed_user_ids: list[int]):
+    """Return a /set handler for direct session config overrides."""
+
+    async def handle(update, context) -> None:
+        user = update.effective_user
+        if user is None or user.id not in allowed_user_ids:
+            return
+
+        chat_id = update.effective_chat.id
+        text: str = update.message.text or ""
+        # Strip the /set command prefix (handles /set@botname too)
+        parts = text.split(maxsplit=1)
+        args_str = parts[1].strip() if len(parts) > 1 else ""
+
+        if not args_str:
+            await update.message.reply_text(_SET_USAGE, parse_mode="HTML")
+            return
+
+        if args_str == "reset":
+            agent_runner.clear_session_override(chat_id)
+            await update.message.reply_text("Session overrides cleared. Using config defaults.")
+            return
+
+        tokens = args_str.split(maxsplit=1)
+        if len(tokens) != 2:
+            await update.message.reply_text(_SET_USAGE, parse_mode="HTML")
+            return
+
+        key, value = tokens
+        if key not in _VALID_KEYS:
+            valid = ", ".join(sorted(_VALID_KEYS))
+            await update.message.reply_text(
+                f"Unknown setting <code>{key}</code>. Valid settings: {valid}",
+                parse_mode="HTML",
+            )
+            return
+
+        if key in _VALID_INT_KEYS:
+            try:
+                parsed_value = int(value)
+            except ValueError:
+                await update.message.reply_text(
+                    f"<code>{key}</code> must be an integer.", parse_mode="HTML"
+                )
+                return
+        else:
+            parsed_value = value
+
+        agent_runner.set_session_override(chat_id, **{key: parsed_value})
+        await update.message.reply_text(
+            f"Session config updated: <code>{key}={parsed_value}</code>. "
+            "Takes effect from the next message.",
+            parse_mode="HTML",
+        )
 
     return handle
