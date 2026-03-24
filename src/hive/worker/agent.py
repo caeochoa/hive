@@ -151,6 +151,7 @@ class ClaudeAgentRunner(AgentRunner):
             else:
                 logger.info("Creating new client for chat_id=%d", chat_id)
 
+            thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
             options = ClaudeAgentOptions(
                 system_prompt=getattr(
                     self._config,
@@ -163,6 +164,8 @@ class ClaudeAgentRunner(AgentRunner):
                 mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
                 model=self._config.model,
                 max_turns=self._config.max_turns,
+                **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
+                   if thinking_budget is not None else {}),
             )
 
             client = ClaudeSDKClient(options)
@@ -193,6 +196,7 @@ class ClaudeAgentRunner(AgentRunner):
         """Execute a one-shot prompt with a disposable client."""
         from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
+        thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
         options = ClaudeAgentOptions(
             system_prompt=getattr(
                 self._config,
@@ -205,6 +209,8 @@ class ClaudeAgentRunner(AgentRunner):
             mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
             model=self._config.model,
             max_turns=self._config.max_turns,
+            **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
+               if thinking_budget is not None else {}),
         )
 
         logger.info("Agent one-shot query: %r", message[:80])

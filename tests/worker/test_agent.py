@@ -413,3 +413,81 @@ def test_log_sdk_message_result_no_cost(runner, caplog):
             runner._log_sdk_message(msg)
 
     assert any("[result]" in r.message and "n/a" in r.message for r in caplog.records)
+
+
+# ------------------------------------------------------------------ #
+# thinking kwarg wiring
+# ------------------------------------------------------------------ #
+
+
+async def _async_empty():
+    """Helper: empty async generator for mocking query()."""
+    return
+    yield  # noqa: unreachable — makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_thinking_kwarg_not_passed_when_none(runner):
+    """When thinking_budget_tokens is absent, 'thinking' kwarg is not passed to ClaudeAgentOptions."""
+    options_kwargs = {}
+
+    def capture_kwargs(**kwargs):
+        options_kwargs.update(kwargs)
+        return MagicMock()
+
+    DummyMsg = type("AssistantMessage", (), {})
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(side_effect=capture_kwargs),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=DummyMsg,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=type("ThinkingBlock", (), {}),
+        ToolUseBlock=type("ToolUseBlock", (), {}),
+        ToolResultBlock=type("ToolResultBlock", (), {}),
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=_async_empty())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner._run_one_shot("test")
+
+    assert "thinking" not in options_kwargs
+
+
+@pytest.mark.asyncio
+async def test_thinking_kwarg_passed_when_set(agent_config, commands_mcp, sessions_file, worker_dir):
+    """When thinking_budget_tokens is set, 'thinking' dict is passed to ClaudeAgentOptions."""
+    agent_config.thinking_budget_tokens = 5000
+    r = ClaudeAgentRunner(
+        config=agent_config,
+        commands_mcp=commands_mcp,
+        command_names=[],
+        sessions_file=sessions_file,
+        worker_dir=worker_dir,
+    )
+
+    options_kwargs = {}
+
+    def capture_kwargs(**kwargs):
+        options_kwargs.update(kwargs)
+        return MagicMock()
+
+    DummyMsg = type("AssistantMessage", (), {})
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(side_effect=capture_kwargs),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=DummyMsg,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=type("ThinkingBlock", (), {}),
+        ToolUseBlock=type("ToolUseBlock", (), {}),
+        ToolResultBlock=type("ToolResultBlock", (), {}),
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=_async_empty())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await r._run_one_shot("test")
+
+    assert options_kwargs.get("thinking") == {"type": "enabled", "budget_tokens": 5000}
