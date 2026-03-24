@@ -92,6 +92,48 @@ class ClaudeAgentRunner(AgentRunner):
         return self._locks[chat_id]
 
     # ------------------------------------------------------------------ #
+    # SDK message logging
+    # ------------------------------------------------------------------ #
+
+    def _log_sdk_message(self, msg: Any) -> None:
+        """Emit structured log lines for each SDK message/block type."""
+        from claude_agent_sdk import AssistantMessage, UserMessage, ResultMessage
+        from claude_agent_sdk import ThinkingBlock, ToolUseBlock, ToolResultBlock
+
+        if isinstance(msg, (AssistantMessage, UserMessage)):
+            for block in msg.content:
+                if isinstance(block, ToolUseBlock):
+                    inp = repr(block.input)
+                    logger.info("[tool_use] %s input=%s", block.name, inp[:120])
+                    logger.debug("[tool_use] %s full_input=%r", block.name, block.input)
+                elif isinstance(block, ToolResultBlock):
+                    content = block.content
+                    if isinstance(content, str):
+                        length = len(content)
+                    elif isinstance(content, list):
+                        length = sum(len(str(c)) for c in content)
+                    else:
+                        length = 0
+                    if block.is_error:
+                        preview = str(content)[:120] if content else ""
+                        logger.error("[tool_error] %s → %s", block.tool_use_id[:8], preview)
+                    else:
+                        logger.info("[tool_result] %s → %d chars", block.tool_use_id[:8], length)
+                        logger.debug("[tool_result] %s full=%r", block.tool_use_id[:8], content)
+                elif isinstance(block, ThinkingBlock):
+                    logger.info("[thinking] %d chars", len(block.thinking))
+                    logger.debug("[thinking] %s", block.thinking)
+        elif isinstance(msg, ResultMessage):
+            cost = msg.total_cost_usd
+            cost_str = f"${cost:.4f}" if cost is not None else "n/a"
+            logger.info(
+                "[result] turns=%d cost=%s stop=%s",
+                msg.num_turns, cost_str, msg.stop_reason,
+            )
+            if msg.usage:
+                logger.debug("[result] usage=%r", msg.usage)
+
+    # ------------------------------------------------------------------ #
     # Client management
     # ------------------------------------------------------------------ #
 
@@ -169,6 +211,7 @@ class ClaudeAgentRunner(AgentRunner):
         t0 = time.monotonic()
         parts: list[str] = []
         async for msg in query(prompt=message, options=options):
+            self._log_sdk_message(msg)
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
@@ -191,6 +234,7 @@ class ClaudeAgentRunner(AgentRunner):
 
             parts: list[str] = []
             async for msg in client.receive_response():
+                self._log_sdk_message(msg)
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -140,28 +141,34 @@ def test_get_lock_creates_per_chat(runner):
 
 @pytest.mark.asyncio
 async def test_run_one_shot(runner, worker_dir):
-    """chat_id=None triggers the one-shot path with a disposable client."""
-    mock_result = MagicMock()
-    mock_result.response = "one-shot reply"
+    """chat_id=None triggers the one-shot path and collects TextBlock text."""
+    # Build mock types for isinstance checks
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
 
-    mock_client_cls = MagicMock()
-    mock_client_instance = AsyncMock()
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-    mock_client_cls.return_value = mock_client_instance
+    text_block = TextBlock()
+    text_block.text = "one-shot reply"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
 
-    mock_options_cls = MagicMock()
+    async def mock_query(**kwargs):
+        yield assistant_msg
 
-    with patch.dict(
-        sys.modules,
-        {
-            "claude_agent_sdk": MagicMock(
-                ClaudeSDKClient=mock_client_cls,
-                ClaudeAgentOptions=mock_options_cls,
-                query=AsyncMock(return_value=mock_result),
-            ),
-        },
-    ):
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         result = await runner.run("hello", chat_id=None, worker_dir=worker_dir)
 
     assert result == "one-shot reply"
@@ -175,34 +182,49 @@ async def test_run_one_shot(runner, worker_dir):
 @pytest.mark.asyncio
 async def test_run_interactive(runner, worker_dir, sessions_file):
     """chat_id != None triggers the interactive path and persists session."""
-    mock_result = MagicMock()
-    mock_result.response = "interactive reply"
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    ResultMessage = type("ResultMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "interactive reply"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+    result_msg = ResultMessage()
+    result_msg.session_id = "new-session-id"
+    result_msg.num_turns = 1
+    result_msg.total_cost_usd = None
+    result_msg.stop_reason = "end_turn"
+    result_msg.usage = None
+
+    async def mock_receive():
+        yield assistant_msg
+        yield result_msg
 
     mock_client_instance = AsyncMock()
     mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
     mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-    mock_client_instance.session_id = "new-session-id"
+    mock_client_instance.receive_response = MagicMock(return_value=mock_receive())
 
-    mock_client_cls = MagicMock(return_value=mock_client_instance)
-    mock_options_cls = MagicMock()
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=mock_client_instance),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=ResultMessage,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
 
-    with patch.dict(
-        sys.modules,
-        {
-            "claude_agent_sdk": MagicMock(
-                ClaudeSDKClient=mock_client_cls,
-                ClaudeAgentOptions=mock_options_cls,
-                query=AsyncMock(return_value=mock_result),
-            ),
-        },
-    ):
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         result = await runner.run("hi there", chat_id=99, worker_dir=worker_dir)
 
     assert result == "interactive reply"
-    # Session should be saved
     assert 99 in runner._sessions
     assert runner._sessions[99]["session_id"] == "new-session-id"
-    # File should exist on disk
     assert sessions_file.exists()
 
 
@@ -258,3 +280,136 @@ async def test_close_all(runner, sessions_file):
     data = json.loads(sessions_file.read_text())
     assert len(data) == 1
     assert data[0]["session_id"] == "s1"
+
+
+# ------------------------------------------------------------------ #
+# _log_sdk_message
+# ------------------------------------------------------------------ #
+
+
+def _make_sdk_mocks():
+    """Build mock SDK classes that mimic the real types."""
+    TextBlock = type("TextBlock", (), {})
+    ThinkingBlock = type("ThinkingBlock", (), {})
+    ToolUseBlock = type("ToolUseBlock", (), {})
+    ToolResultBlock = type("ToolResultBlock", (), {})
+
+    class AssistantMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class UserMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class ResultMessage:
+        def __init__(self, num_turns, total_cost_usd, stop_reason, usage=None):
+            self.num_turns = num_turns
+            self.total_cost_usd = total_cost_usd
+            self.stop_reason = stop_reason
+            self.usage = usage
+            self.session_id = "sess-123"
+            self.is_error = False
+
+    return {
+        "AssistantMessage": AssistantMessage,
+        "UserMessage": UserMessage,
+        "ResultMessage": ResultMessage,
+        "TextBlock": TextBlock,
+        "ThinkingBlock": ThinkingBlock,
+        "ToolUseBlock": ToolUseBlock,
+        "ToolResultBlock": ToolResultBlock,
+    }
+
+
+def test_log_sdk_message_tool_use(runner, caplog):
+    """ToolUseBlock in AssistantMessage logs [tool_use] at INFO."""
+    mocks = _make_sdk_mocks()
+
+    tool_block = mocks["ToolUseBlock"]()
+    tool_block.name = "Read"
+    tool_block.input = {"file_path": "/foo/bar.md"}
+    msg = mocks["AssistantMessage"](content=[tool_block])
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.INFO, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any("[tool_use]" in r.message and "Read" in r.message for r in caplog.records)
+
+
+def test_log_sdk_message_tool_result_ok(runner, caplog):
+    """ToolResultBlock (no error) in UserMessage logs [tool_result] at INFO."""
+    mocks = _make_sdk_mocks()
+
+    result_block = mocks["ToolResultBlock"]()
+    result_block.tool_use_id = "abc12345"
+    result_block.content = "file contents here"
+    result_block.is_error = False
+    msg = mocks["UserMessage"](content=[result_block])
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.INFO, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any("[tool_result]" in r.message for r in caplog.records)
+    assert not any("[tool_error]" in r.message for r in caplog.records)
+
+
+def test_log_sdk_message_tool_result_error(runner, caplog):
+    """ToolResultBlock with is_error=True logs [tool_error] at ERROR."""
+    mocks = _make_sdk_mocks()
+
+    result_block = mocks["ToolResultBlock"]()
+    result_block.tool_use_id = "abc12345"
+    result_block.content = "No such file"
+    result_block.is_error = True
+    msg = mocks["UserMessage"](content=[result_block])
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.ERROR, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any("[tool_error]" in r.message for r in caplog.records)
+
+
+def test_log_sdk_message_thinking(runner, caplog):
+    """ThinkingBlock in AssistantMessage logs [thinking] at INFO."""
+    mocks = _make_sdk_mocks()
+
+    think_block = mocks["ThinkingBlock"]()
+    think_block.thinking = "Let me reason about this carefully..."
+    msg = mocks["AssistantMessage"](content=[think_block])
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.INFO, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any("[thinking]" in r.message for r in caplog.records)
+
+
+def test_log_sdk_message_result(runner, caplog):
+    """ResultMessage logs [result] with turns, cost, and stop_reason at INFO."""
+    mocks = _make_sdk_mocks()
+    msg = mocks["ResultMessage"](num_turns=3, total_cost_usd=0.0021, stop_reason="end_turn")
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.INFO, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any(
+        "[result]" in r.message and "turns=3" in r.message and "end_turn" in r.message
+        for r in caplog.records
+    )
+
+
+def test_log_sdk_message_result_no_cost(runner, caplog):
+    """ResultMessage with total_cost_usd=None logs cost as 'n/a'."""
+    mocks = _make_sdk_mocks()
+    msg = mocks["ResultMessage"](num_turns=1, total_cost_usd=None, stop_reason="max_turns")
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": MagicMock(**mocks)}):
+        with caplog.at_level(logging.INFO, logger="hive.worker.agent"):
+            runner._log_sdk_message(msg)
+
+    assert any("[result]" in r.message and "n/a" in r.message for r in caplog.records)
