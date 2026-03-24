@@ -1,6 +1,6 @@
 # Hive Architecture Design
 
-_Last updated: 2026-03-09_
+_Last updated: 2026-03-24_
 
 ---
 
@@ -121,12 +121,12 @@ A script works identically whether triggered by `/summarise 10` or by the agent 
 
 Some commands are built into Hive itself — present on every Worker regardless of what's in `commands/`, not authored by the Worker developer, and not exposed as agent tools. They are meta/control commands that operate on the Worker runtime rather than on Worker data.
 
-**Initial set:**
-
 | Command | What it does |
 |---|---|
-| `/reset` | Clears the agent session for the current Telegram chat ID. The next message starts a fresh conversation with no prior context. |
+| `/reset` | Clears the agent session for the current Telegram chat ID. The next message starts a fresh conversation with no prior context. Also clears any active session overrides. |
 | `/help` | Lists all available commands (built-in + user-defined) with their descriptions. |
+| `/menu` | Opens an inline keyboard launcher for quick command access. |
+| `/set` | Override session config for the current conversation. See §4b. |
 
 Built-in handlers are registered by `WorkerRuntime` directly, before user-defined commands. They take precedence: if a user creates `commands/reset.py`, Hive logs a warning and the built-in wins.
 
@@ -144,9 +144,9 @@ from claude_agent_sdk import query, ClaudeAgentOptions
 options = ClaudeAgentOptions(
     system_prompt="You are a worker agent. Your world is this folder.",
     allowed_tools=["Read", "Write", "Bash", "Glob"],
-    permission_mode="acceptEdits",
+    permission_mode="bypassPermissions",
     cwd="/path/to/worker-folder",
-    mcp_servers={"commands": commands_mcp_server},
+    mcp_servers={"commands": commands_mcp_server, "builtins": builtins_mcp_server},
     model="claude-haiku-4-5",
     max_turns=10,
 )
@@ -154,8 +154,61 @@ options = ClaudeAgentOptions(
 
 - `memory/` is the agent's primary read/write state store
 - `commands/` scripts are exposed as tools via an in-process MCP server
-- Agent sessions persist across messages (session ID stored in memory, keyed by Telegram chat ID)
+- Agent sessions persist across messages (session ID stored in `.sessions.json`, keyed by Telegram chat ID)
 - After each agent turn, Hive stages and commits any modified files to git
+
+### Self-configuration
+
+When no custom `agent_system_prompt` is set in `hive.toml`, the agent is instructed that it may modify `hive.toml` and `commands/`. After any interactive turn where those files change, the runtime detects the difference (via mtime comparison on `hive.toml` and `commands/*.py`) and:
+
+1. Sends a "Config updated. Restarting…" message to the user
+2. Schedules a SIGTERM after a 1.5 s delay — supervisord restarts the process with the new config
+
+**Session continuity across restarts:** session IDs are persisted in `.sessions.json`, so conversation context survives a restart.
+
+**Scheduled tasks do not trigger restart.** Change detection is wired only into the interactive NL message handler. Scheduled `agent_prompt` tasks intentionally skip it to avoid unattended restarts mid-schedule; supervisord will pick up any config changes on the next interactive turn.
+
+**Error handling:** if the agent turn or Telegram delivery fails, change detection is skipped entirely. A partial write to `hive.toml` during an errored turn will not trigger a restart.
+
+> **Note:** if `send_long_message` itself throws (e.g. a Telegram network error after a successful agent turn), the snapshot is never taken and no restart fires — even if config files were changed. This is intentional: if we couldn't confirm delivery, the worker treats the turn as inconclusive.
+
+---
+
+## 4b. Session Overrides
+
+Agents and users can temporarily override `model`, `max_turns`, or `thinking_budget_tokens` for the current Telegram chat session without modifying `hive.toml`.
+
+### Via the agent (`set_session_config` MCP tool)
+
+The agent has access to a built-in `set_session_config` tool (exposed via an in-process `builtins` MCP server, separate from `commands/`). The agent can call it when the user asks to change settings for the current conversation:
+
+```
+set_session_config(model="claude-opus-4-6")
+set_session_config(max_turns=20)
+set_session_config(thinking_budget_tokens=8000)
+```
+
+Changes take effect from the **next** message (the current client is closed and rebuilt with the new options).
+
+### Via the `/set` command (user-facing)
+
+Users can set overrides directly without going through the agent:
+
+```
+/set model claude-opus-4-6
+/set max_turns 20
+/set thinking_budget_tokens 8000
+/set reset          ← clear all overrides
+```
+
+`/set model` validates that the value starts with `claude-` and rejects it immediately if not.
+
+### Override lifecycle
+
+- Overrides are **in-memory only** — not written to `hive.toml`.
+- Sequential `/set` calls **accumulate** (setting `model` then `max_turns` keeps both).
+- Overrides are cleared by `/reset` or any worker restart (including config-triggered restarts).
+- `thinking_budget_tokens` is stored as an integer override and translated to the SDK's `thinking: {type: "enabled", budget_tokens: N}` shape when the client is rebuilt.
 
 ---
 

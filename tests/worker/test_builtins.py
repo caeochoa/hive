@@ -98,7 +98,7 @@ class TestHelpHandler:
         await handler(update, MagicMock())
 
         kwargs = update.message.reply_text.call_args[1]
-        assert kwargs.get("parse_mode") == "Markdown"
+        assert kwargs.get("parse_mode") == "HTML"
 
 
 class TestResetHandlerAuth:
@@ -124,6 +124,49 @@ class TestResetHandlerAuth:
         await handler(update, MagicMock())
 
         agent.reset_session.assert_awaited_once()
+
+
+class TestSetHandler:
+    def _make_set_update(self, text: str, user_id: int = 12345):
+        from hive.worker.builtins import make_set_handler
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.effective_user = MagicMock()
+        update.effective_user.id = user_id
+        update.message.text = text
+        update.message.reply_text = AsyncMock()
+        return update
+
+    @pytest.mark.asyncio
+    async def test_invalid_model_rejected_immediately(self):
+        """A model value that doesn't start with 'claude-' is rejected with an error."""
+        from hive.worker.builtins import make_set_handler
+
+        agent = MagicMock()
+        agent.set_session_override = MagicMock()
+        handler = make_set_handler(agent, allowed_user_ids=[12345])
+
+        update = self._make_set_update("/set model gpt-4o")
+        await handler(update, MagicMock())
+
+        agent.set_session_override.assert_not_called()
+        update.message.reply_text.assert_awaited_once()
+        text = update.message.reply_text.call_args[0][0]
+        assert "claude-" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_valid_model_accepted(self):
+        """A model value starting with 'claude-' is accepted."""
+        from hive.worker.builtins import make_set_handler
+
+        agent = MagicMock()
+        agent.set_session_override = MagicMock()
+        handler = make_set_handler(agent, allowed_user_ids=[12345])
+
+        update = self._make_set_update("/set model claude-opus-4-6")
+        await handler(update, MagicMock())
+
+        agent.set_session_override.assert_called_once_with(12345, model="claude-opus-4-6")
 
 
 class TestHelpHandlerAuth:

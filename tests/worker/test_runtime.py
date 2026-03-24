@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +36,23 @@ def _make_runtime(tmp_path: Path) -> WorkerRuntime:
 # ------------------------------------------------------------------ #
 # Scheduler lifecycle
 # ------------------------------------------------------------------ #
+
+
+class TestBuildSystemPrompt:
+    def test_default_prompt_includes_self_config_instructions(self, tmp_path):
+        """When agent_system_prompt is not set, self-config instructions are appended."""
+        rt = _make_runtime(tmp_path)
+        prompt = rt._build_system_prompt()
+        assert "hive.toml" in prompt
+        assert "set_session_config" in prompt
+
+    def test_custom_prompt_used_as_is(self, tmp_path):
+        """When agent_system_prompt is set, it is used verbatim without self-config instructions."""
+        rt = _make_runtime(tmp_path)
+        rt._config = SimpleNamespace(**{**rt._config.__dict__, "agent_system_prompt": "My custom prompt."})
+        prompt = rt._build_system_prompt()
+        assert prompt == "My custom prompt."
+        assert "hive.toml" not in prompt
 
 
 class TestSchedulerLifecycle:
@@ -189,8 +208,8 @@ class TestRegisterHandlers:
 
         rt._register_handlers()
 
-        # 2 built-ins + 2 user commands + 1 catch-all NL handler = 5
-        assert rt._app.add_handler.call_count == 5
+        # 5 built-ins (reset, help, menu, set, callback) + 2 user commands + 1 catch-all NL handler = 8
+        assert rt._app.add_handler.call_count == 8
 
     def test_skips_colliding_commands(self, tmp_path):
         rt = _make_runtime(tmp_path)
@@ -209,8 +228,8 @@ class TestRegisterHandlers:
 
         rt._register_handlers()
 
-        # 2 built-ins + 1 user command (colliding skipped) + 1 catch-all = 4
-        assert rt._app.add_handler.call_count == 4
+        # 5 built-ins (reset, help, menu, set, callback) + 1 user command (colliding skipped) + 1 catch-all = 7
+        assert rt._app.add_handler.call_count == 7
 
 
 # ------------------------------------------------------------------ #
@@ -273,3 +292,176 @@ class TestHandleNlMessage:
         update.message.reply_text.assert_awaited_once_with(
             "Something went wrong. Check the logs."
         )
+
+
+# ------------------------------------------------------------------ #
+# _snapshot_worker_paths
+# ------------------------------------------------------------------ #
+
+
+class TestSnapshotWorkerPaths:
+    def test_includes_hive_toml(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        # hive.toml already written by make_config
+        snapshot = rt._snapshot_worker_paths()
+        assert tmp_path / "hive.toml" in snapshot
+        assert isinstance(snapshot[tmp_path / "hive.toml"], int)
+
+    def test_includes_command_scripts(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        script = commands_dir / "foo.py"
+        script.write_text("# foo")
+
+        snapshot = rt._snapshot_worker_paths()
+        assert script in snapshot
+
+    def test_missing_toml_skipped(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        (tmp_path / "hive.toml").unlink()
+        snapshot = rt._snapshot_worker_paths()
+        assert tmp_path / "hive.toml" not in snapshot
+
+    def test_no_commands_dir_returns_only_toml(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        snapshot = rt._snapshot_worker_paths()
+        # Only hive.toml, no commands/ dir
+        assert len(snapshot) == 1
+
+
+# ------------------------------------------------------------------ #
+# _detect_worker_changes
+# ------------------------------------------------------------------ #
+
+
+class TestDetectWorkerChanges:
+    def test_no_change_returns_false(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        path = tmp_path / "hive.toml"
+        snap = {path: 1000}
+        assert rt._detect_worker_changes(snap, snap) is False
+
+    def test_mtime_changed_returns_true(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        path = tmp_path / "hive.toml"
+        assert rt._detect_worker_changes({path: 1000}, {path: 1001}) is True
+
+    def test_new_file_returns_true(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        new_path = tmp_path / "commands" / "foo.py"
+        assert rt._detect_worker_changes({}, {new_path: 1000}) is True
+
+    def test_deleted_file_returns_true(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        old_path = tmp_path / "commands" / "foo.py"
+        assert rt._detect_worker_changes({old_path: 1000}, {}) is True
+
+    def test_identical_snapshots_returns_false(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        p1 = tmp_path / "hive.toml"
+        p2 = tmp_path / "commands" / "bar.py"
+        snap = {p1: 111, p2: 222}
+        assert rt._detect_worker_changes(snap, snap.copy()) is False
+
+
+# ------------------------------------------------------------------ #
+# _delayed_restart
+# ------------------------------------------------------------------ #
+
+
+class TestDelayedRestart:
+    @pytest.mark.asyncio
+    async def test_sends_sigterm(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        with patch("hive.worker.runtime.asyncio.sleep", new_callable=AsyncMock):
+            with patch("hive.worker.runtime.os.kill") as mock_kill:
+                await rt._delayed_restart(0)
+        mock_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+
+
+# ------------------------------------------------------------------ #
+# _handle_nl_message with config change detection
+# ------------------------------------------------------------------ #
+
+
+class TestHandleNlMessageWithRestart:
+    @pytest.mark.asyncio
+    async def test_triggers_restart_when_config_changed(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+        rt._agent.run = AsyncMock(return_value="ok")
+        rt._app = MagicMock()
+        rt._app.bot.send_message = AsyncMock()
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+
+        before_snap = {tmp_path / "hive.toml": 1000}
+        after_snap = {tmp_path / "hive.toml": 2000}  # mtime changed
+
+        # Patch _delayed_restart so the test doesn't actually send SIGTERM.
+        # The task is created normally (so typing_action still works), but the
+        # coroutine body is a no-op mock.
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock):
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                with patch.object(rt, "_snapshot_worker_paths", side_effect=[before_snap, after_snap]):
+                    with patch.object(rt, "_delayed_restart", new_callable=AsyncMock):
+                        await rt._handle_nl_message(update, MagicMock())
+
+        rt._app.bot.send_message.assert_awaited_once()
+        sent_text = rt._app.bot.send_message.call_args.kwargs.get("text", "")
+        assert "Restarting" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_no_restart_on_agent_error_even_if_files_changed(self, tmp_path):
+        """Config change detected after an agent error must NOT trigger restart."""
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+        rt._agent.run = AsyncMock(side_effect=RuntimeError("agent blew up"))
+        rt._app = MagicMock()
+        rt._app.bot.send_message = AsyncMock()
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+        update.message.reply_text = AsyncMock()
+
+        before_snap = {tmp_path / "hive.toml": 1000}
+        after_snap = {tmp_path / "hive.toml": 2000}  # config changed mid-error
+
+        with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+            with patch.object(rt, "_snapshot_worker_paths", side_effect=[before_snap, after_snap]):
+                with patch.object(rt, "_delayed_restart", new_callable=AsyncMock) as mock_restart:
+                    await rt._handle_nl_message(update, MagicMock())
+
+        # No restart message, no restart scheduled
+        rt._app.bot.send_message.assert_not_awaited()
+        mock_restart.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_restart_when_files_unchanged(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+        rt._agent.run = AsyncMock(return_value="ok")
+        rt._app = MagicMock()
+        rt._app.bot.send_message = AsyncMock()
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+
+        snap = {tmp_path / "hive.toml": 1000}
+
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock):
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                with patch.object(rt, "_snapshot_worker_paths", side_effect=[snap, snap]):
+                    with patch.object(rt, "_delayed_restart", new_callable=AsyncMock) as mock_restart:
+                        await rt._handle_nl_message(update, MagicMock())
+
+        rt._app.bot.send_message.assert_not_awaited()
+        mock_restart.assert_not_called()

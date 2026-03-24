@@ -50,7 +50,7 @@ async def test_index_returns_200_and_lists_workers(mock_workers):
         resp = await client.get("/")
     assert resp.status_code == 200
     assert "test" in resp.text
-    assert "1 worker(s) registered" in resp.text
+    assert "1 worker registered" in resp.text
 
 
 @pytest.mark.asyncio
