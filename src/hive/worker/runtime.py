@@ -253,6 +253,10 @@ class WorkerRuntime:
                 )
             await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
 
+            # Note: snapshot is taken inside the try block so that errors during
+            # send_long_message (e.g. Telegram network failure) also skip the restart.
+            # This is intentional: if we couldn't deliver the response, we don't know
+            # whether the agent finished cleanly, so we err on the side of no restart.
             after = self._snapshot_worker_paths()
             if self._detect_worker_changes(before, after):
                 logger.info("Worker config files changed — scheduling restart")

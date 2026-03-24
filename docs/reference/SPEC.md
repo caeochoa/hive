@@ -1,6 +1,6 @@
 # 🐝 Hive
 
-**Project Specification — v0.2**
+**Project Specification — v0.3**
 _Last updated: March 2026_
 
 ---
@@ -72,6 +72,7 @@ The Worker is not the agent. The Worker is an event loop that runs continuously,
 - Commands map directly to scripts in the `commands/` folder.
 - Commands are auto-discovered from `commands/` at startup and registered with Telegram.
 - Auth is controlled via `TELEGRAM_ALLOWED_USER_ID` in `.env` — only that user ID can interact with the bot.
+- Built-in commands (`/reset`, `/help`, `/menu`, `/set`) are always present on every Worker regardless of what's in `commands/`.
 
 ### 4.2 Agent
 
@@ -80,7 +81,11 @@ The Worker is not the agent. The Worker is an event loop that runs continuously,
 - The agent's tools are auto-discovered from the `commands/` folder. Each script exposes a metadata block (description, args schema) that the Worker registers at startup.
 - `memory/` is the agent's primary read/write state store — free-form files, no structured store required.
 - Hive auto-commits any modified files after each agent turn, so the git repo acts as an audit trail for all agent writes.
-- Agent sessions persist per Telegram chat ID.
+- Agent sessions persist per Telegram chat ID, surviving worker restarts.
+
+**Self-configuration:** the agent can modify `hive.toml` and `commands/` to reconfigure itself. After any interactive turn where those files change, the Worker automatically restarts (SIGTERM → supervisord) so the new config takes effect immediately. Conversation sessions survive the restart.
+
+**Session overrides:** the agent and users can temporarily override `model`, `max_turns`, or `thinking_budget_tokens` for the current conversation without modifying `hive.toml`. The agent uses the `set_session_config` tool; users use `/set`. Overrides are in-memory only and reset on `/reset` or restart.
 
 **Decision: the agent is powered by the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)** (`pip install claude-agent-sdk`). It runs on the existing Claude Code installation and inherits its authentication — no API key or separate billing required for personal local use. The SDK provides built-in filesystem tools (`Read`, `Write`, `Bash`, `Glob`) and supports a `cwd` parameter to scope the agent to the Worker's folder, which maps directly onto the "one folder = one world" design. Custom tools are registered as in-process MCP servers, which is how `commands/` scripts are exposed to the agent.
 
