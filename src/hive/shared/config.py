@@ -20,6 +20,7 @@ class WorkerConfig(BaseModel):
     agent_memory_dir: str = "memory/"
     agent_max_turns: int = 10
     agent_system_prompt: Optional[str] = None
+    agent_thinking_budget_tokens: Optional[int] = None
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
     comb_theme: str = "terminal-dark"
@@ -66,6 +67,7 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
         agent_memory_dir=agent_section.get("memory_dir", "memory/"),
         agent_max_turns=int(agent_section.get("max_turns", 10)),
         agent_system_prompt=agent_section.get("system_prompt"),
+        agent_thinking_budget_tokens=agent_section.get("thinking_budget_tokens"),
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
         comb_theme=comb_theme,
