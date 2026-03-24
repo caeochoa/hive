@@ -79,6 +79,7 @@ class WorkerRuntime:
             or "You are a worker agent. Your world is this folder.",
             max_turns=self._config.agent_max_turns,
             memory_dir=self._config.agent_memory_dir,
+            thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
         )
         sessions_file = (
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"
