@@ -2,6 +2,8 @@
 
 This guide walks you through creating a Hive Worker from scratch — starting with the minimum viable setup and layering on features progressively.
 
+> See also: [Feature Guide](../features.md) — a full capability reference once you have a Worker running.
+
 ## Prerequisites
 
 - **Hive installed** — clone the repo and run `uv sync` from the project root
@@ -104,6 +106,8 @@ hive restart ./my-worker
 
 Now send `/hello` in Telegram. The agent can also call this command as a tool during conversations.
 
+> See also: [Commands reference](../commands/README.md)
+
 ## 3. Add a command with arguments
 
 Commands can accept typed arguments with defaults. Create `my-worker/commands/greet.py`:
@@ -185,6 +189,8 @@ The `memory/` directory is the agent's persistent state store. The agent can rea
 
 Agent sessions are tracked per Telegram chat ID, with session state stored in `memory/.sessions.json`.
 
+> See also: [Agent reference](../agent/README.md)
+
 ### Auto-commit
 
 After every agent turn, Hive automatically commits any changes to these tracked paths in the Worker's git repo:
@@ -217,6 +223,8 @@ agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 ```
 
 Each schedule entry requires `cron` and exactly one of `run` or `agent_prompt`.
+
+> See also: [Scheduling reference](../scheduling/README.md)
 
 ### Cron syntax examples
 
@@ -257,6 +265,8 @@ hive comb
 View your Worker's dashboard at `http://localhost:8080/workers/my-worker`.
 
 By default the server binds to `127.0.0.1:8080`. Use `--host` and `--port` to override.
+
+> See also: [Dashboard reference](../dashboard/README.md)
 
 ## 7. Reference
 

@@ -7,8 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Hive** is a local-first framework for spinning up purpose-built Telegram bots called **Workers**. The central philosophy is **one folder = one world**: a Worker folder contains all its config, scripts, memory, and logs; Hive provides the shared infrastructure that runs them.
 
 Key docs:
-- `docs/reference/SPEC.md` — evergreen scope document: what Hive is, vocabulary, components, and design decisions
-- `docs/reference/architecture.md` — concrete implementation detail: data flows, config schemas, CLI contract, supervisord setup
+- `docs/reference/SPEC.md` — evergreen scope document: vocabulary, design philosophy, and architectural rationale
+- `docs/reference/architecture.md` — diagrams (two-layer model, message routing), supervisord setup, worker folder structure, self-config edge cases
+- `docs/features.md` — capability reference for worker developers; what Hive can do
+- `docs/commands/README.md` — command script format, execution contract, agent tool wiring
+- `docs/agent/README.md` — agent config, sessions, self-config, session overrides, extended thinking
+- `docs/scheduling/README.md` — cron scheduling, `run` and `agent_prompt` job types
+- `docs/dashboard/README.md` — all Comb cell types with examples
+- `docs/cli/README.md` — complete CLI reference
+- `docs/config/README.md` — canonical `hive.toml` and `.env` field reference
 
 ## Development Commands
 
@@ -73,33 +80,14 @@ At startup, Hive scans `commands/`, parses docstrings, and registers both Telegr
 Powered by the **Claude Agent SDK** (`claude-agent-sdk`). Key design points:
 - Scoped to the Worker folder via `cwd` parameter
 - Built-in filesystem tools: `Read`, `Write`, `Bash`, `Glob`
-- `commands/` scripts exposed as tools via in-process MCP server
+- `commands/` scripts exposed as tools via in-process MCP server (`commands` key)
+- Built-in `set_session_config` tool exposed via a second MCP server (`builtins` key)
 - `memory/` is the agent's primary read/write state store
-- Agent sessions persist per Telegram chat ID (session ID stored in `memory/`)
+- Agent sessions persist per Telegram chat ID (stored in `memory/.sessions.json`)
+- Per-chat session overrides (model, max_turns, thinking_budget_tokens) held in memory; reset on `/reset` or restart
+- Worker self-configuration: agent can edit `hive.toml`/`commands/*.py`; runtime detects changes and schedules SIGTERM self-restart
 - Hive auto-commits any modified files after each agent turn
-
-```python
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
-
-options = ClaudeAgentOptions(
-    system_prompt="You are a worker agent. Your world is this folder.",
-    allowed_tools=["Read", "Write", "Bash", "Glob"],
-    permission_mode="bypassPermissions",
-    cwd="/path/to/worker-folder",
-    mcp_servers={"commands": commands_mcp_server},
-    model="claude-haiku-4-5",
-    max_turns=10,
-)
-
-# Streaming response pattern
-parts: list[str] = []
-async for msg in query(prompt=message, options=options):
-    if isinstance(msg, AssistantMessage):
-        for block in msg.content:
-            if isinstance(block, TextBlock):
-                parts.append(block.text)
-response = "".join(parts)
-```
+- All SDK activity (tool calls, thinking, cost) logged with structured tags: `[tool_use]`, `[tool_result]`, `[tool_error]`, `[thinking]`, `[result]`
 
 ### Secrets management
 
@@ -114,6 +102,8 @@ TELEGRAM_ALLOWED_USER_ID=...        # single user; comma-separate for multiple: 
 
 ### Configuration (`hive.toml`)
 
+Full field reference: `docs/config/README.md`
+
 ```toml
 [worker]
 name = "budget"
@@ -122,6 +112,8 @@ name = "budget"
 model = "claude-haiku-4-5"
 memory_dir = "memory/"
 max_turns = 10
+# system_prompt = "..."          # optional; disables self-config instructions if set
+# thinking_budget_tokens = 5000  # optional; enables extended thinking
 
 [[schedule]]
 cron = "0 8 * * *"
@@ -133,9 +125,10 @@ agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 
 [comb]
 cells = [
-  { type = "log",    title = "Activity",    source = "logs/worker.log" },
-  { type = "file",   title = "Summary",     source = "memory/summary.md" },
-  { type = "metric", title = "Tasks today", source = "memory/stats.json", key = "tasks_today" },
+  { type = "log",      title = "Activity",    source = "logs/worker.log" },
+  { type = "markdown", title = "Summary",     source = "memory/summary.md" },
+  { type = "metric",   title = "Tasks today", source = "memory/stats.json", key = "tasks_today" },
+  { type = "status",   title = "Health",      source = "memory/health.json", key = "status" },
 ]
 ```
 
@@ -147,15 +140,11 @@ Workers run as OS processes managed by **supervisord**. `hive start`/`hive stop`
 
 A single centralised Hive web server serves all Workers at `<host>:8080/workers/<name>`. Binds to `0.0.0.0` (LAN-accessible). Config-driven — no custom code per Worker.
 
-MVP cell types:
-
-| Type | Renders |
-|---|---|
-| `log` | Tail of a log file, auto-refreshing |
-| `file` | Markdown or plain text file |
-| `metric` | Single value extracted from a JSON file by key |
+Cell types: `log`, `file`, `markdown`, `metric`, `status`, `table`, `chart`. Full reference: `docs/dashboard/README.md`.
 
 ### Hive CLI
+
+Full reference: `docs/cli/README.md`
 
 | Command | What it does |
 |---|---|
@@ -167,6 +156,7 @@ MVP cell types:
 | `hive status` | `supervisorctl status` for all Workers |
 | `hive logs <path>` | Tail Worker logs (`-n <lines>`, `-f` to follow) |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |
+| `hive comb start/stop/restart` | Manage the Comb dashboard server |
 
 ## Key Entry Points
 
@@ -177,6 +167,8 @@ MVP cell types:
 | Message routing (command vs NL) | `src/hive/worker/runtime.py` | `_handle_nl_message()`, `_register_handlers()` |
 | Command discovery & execution | `src/hive/worker/commands.py` | `CommandRegistry.discover()` |
 | Agent SDK integration | `src/hive/worker/agent.py` | `ClaudeAgentRunner.run()` |
-| Built-in commands (/reset, /help, /menu) | `src/hive/worker/builtins.py` | `make_*_handler()` functions |
+| Built-in commands (/reset, /help, /menu, /set) | `src/hive/worker/builtins.py` | `make_*_handler()` functions |
+| Built-in MCP tools (set_session_config) | `src/hive/worker/builtin_tools.py` | `build_builtin_mcp_server()` |
+| Session overrides & self-config restart | `src/hive/worker/agent.py` | `set_session_override()`, `_run_interactive()` |
 | All Pydantic data models | `src/hive/shared/models.py` | Top of file |
 | Worker utilities (typing, formatting) | `src/hive/worker/utils.py` | `docs/guides/worker-internals.md` |
