@@ -125,7 +125,7 @@ theme = "terminal-dark"
 [[comb.cells]]
 type = "log"
 title = "Activity"
-source = "logs/worker.log"
+source = "logs/out.log"
 
 [[comb.cells]]
 type = "file"
@@ -137,6 +137,18 @@ type = "metric"
 title = "Tasks today"
 source = "memory/stats.json"
 key = "tasks_today"
+```
+
+The same configuration can be written using inline table array syntax:
+
+```toml
+[comb]
+theme = "terminal-dark"
+cells = [
+  { type = "log",    title = "Activity",    source = "logs/out.log" },
+  { type = "file",   title = "Notes",       source = "memory/notes.md" },
+  { type = "metric", title = "Tasks today", source = "memory/stats.json", key = "tasks_today" },
+]
 ```
 
 ---
@@ -187,7 +199,7 @@ theme = "terminal-dark"
 [[comb.cells]]
 type = "log"
 title = "Activity"
-source = "logs/worker.log"
+source = "logs/out.log"
 
 # Render a markdown file.
 [[comb.cells]]

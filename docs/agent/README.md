@@ -73,8 +73,9 @@ Overrides take effect from the **next message** after they are set — the curre
 Rules:
 - `model` value must start with `claude-`
 - `max_turns` and `thinking_budget_tokens` must be integers
-- `/set reset` clears all overrides, reverting to `hive.toml` defaults
 - `/set` with no arguments prints usage
+
+To revert all overrides to `hive.toml` defaults: **`/set reset`**
 
 ### Via `set_session_config` MCP tool (agent-initiated)
 

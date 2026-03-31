@@ -125,7 +125,7 @@ agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 
 [comb]
 cells = [
-  { type = "log",      title = "Activity",    source = "logs/worker.log" },
+  { type = "log",      title = "Activity",    source = "logs/out.log" },
   { type = "markdown", title = "Summary",     source = "memory/summary.md" },
   { type = "metric",   title = "Tasks today", source = "memory/stats.json", key = "tasks_today" },
   { type = "status",   title = "Health",      source = "memory/health.json", key = "status" },
