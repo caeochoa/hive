@@ -269,6 +269,24 @@ def run(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     asyncio.run(runtime.run())
 
 
+@app.command()
+def chat(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
+    """Open an interactive TUI chat session with a Worker."""
+    import asyncio
+
+    from hive.shared.config import ConfigError, load_worker_config_for_tui
+    from hive.worker.tui import run_tui
+
+    worker_dir = Path(path).resolve()
+    try:
+        config = load_worker_config_for_tui(worker_dir)
+    except ConfigError as e:
+        typer.echo(f"Config error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    asyncio.run(run_tui(config))
+
+
 comb_app = typer.Typer(help="Manage the Comb dashboard server.")
 app.add_typer(comb_app, name="comb")
 
