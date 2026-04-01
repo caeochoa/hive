@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from apscheduler.events import EVENT_JOB_ERROR, JobExecutionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from hive.shared.config import WorkerConfig
-from hive.worker.commands import CommandRegistry
 from hive.worker.agent import AgentRunner
-from hive.worker.utils import send_long_message, md_to_telegram_html
+from hive.worker.commands import CommandRegistry
+from hive.worker.utils import md_to_telegram_html, send_long_message
 
 logger = logging.getLogger(__name__)
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 import tomllib
 from pathlib import Path
-from typing import Optional
+
 from dotenv import dotenv_values
 from pydantic import BaseModel
-from hive.shared.models import ScheduleEntry, CombCell
+
+from hive.shared.models import CombCell, ScheduleEntry
 
 
 class ConfigError(Exception):
@@ -19,8 +21,8 @@ class WorkerConfig(BaseModel):
     agent_model: str = "claude-haiku-4-5"
     agent_memory_dir: str = "memory/"
     agent_max_turns: int = 10
-    agent_system_prompt: Optional[str] = None
-    agent_thinking_budget_tokens: Optional[int] = None
+    agent_system_prompt: str | None = None
+    agent_thinking_budget_tokens: int | None = None
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
     comb_theme: str = "terminal-dark"

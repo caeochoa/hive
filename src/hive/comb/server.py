@@ -1,9 +1,27 @@
+import asyncio
 import atexit
+import logging
 import socket
 import time
-import asyncio
-import logging
 from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+
+from hive.comb.cells import (
+    CellRenderError,
+    render_chart_cell,
+    render_file_cell,
+    render_markdown_cell,
+    render_metric_cell,
+    render_status_cell,
+    render_table_cell,
+    resolve_latest_in_dir,
+    tail_log_file,
+)
+from hive.shared.config import WorkerConfig, load_worker_config
+from hive.shared.registry import HiveRegistry
 
 PORT_FILE = Path.home() / ".config" / "hive" / "comb.port"
 
@@ -17,16 +35,6 @@ def _find_free_port(start: int = 8080) -> int:
                 return port
             except OSError:
                 port += 1
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from hive.shared.registry import HiveRegistry
-from hive.shared.config import load_worker_config, WorkerConfig
-from hive.comb.cells import (
-    render_file_cell, render_markdown_cell, render_metric_cell,
-    render_status_cell, render_table_cell, render_chart_cell,
-    tail_log_file, resolve_latest_in_dir, CellRenderError,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +146,7 @@ async def _sse_log_generator(log_path: Path):
             while not log_path.exists():
                 await asyncio.sleep(1)
 
-        with open(log_path, "r") as f:
+        with open(log_path) as f:
             f.seek(0, 2)  # Seek to end
             while True:
                 line = f.readline()

@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 if TYPE_CHECKING:
+    from hive.shared.models import CommandMeta
     from hive.worker.agent import AgentRunner, ClaudeAgentRunner
     from hive.worker.commands import CommandRegistry
-    from hive.shared.models import CommandMeta
 
 BUILTIN_NAMES: set[str] = {"reset", "help", "menu", "set"}
 
@@ -107,7 +107,7 @@ def make_callback_handler(registry: CommandRegistry, allowed_user_ids: list[int]
 
     async def handle(update, context) -> None:
         from hive.worker.commands import CommandError
-        from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
+        from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
 
         query = update.callback_query
         user = query.from_user

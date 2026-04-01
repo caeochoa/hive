@@ -118,8 +118,14 @@ class ClaudeAgentRunner(AgentRunner):
 
     def _log_sdk_message(self, msg: Any) -> None:
         """Emit structured log lines for each SDK message/block type."""
-        from claude_agent_sdk import AssistantMessage, UserMessage, ResultMessage
-        from claude_agent_sdk import ThinkingBlock, ToolUseBlock, ToolResultBlock
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ResultMessage,
+            ThinkingBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
+        )
 
         if isinstance(msg, (AssistantMessage, UserMessage)):
             for block in msg.content:

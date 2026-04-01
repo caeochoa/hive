@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+
 from pydantic import BaseModel, model_validator
 
 
@@ -7,7 +7,7 @@ class CommandArg(BaseModel):
     name: str
     type: str  # "int", "str", "float", "bool"
     description: str
-    default: Optional[str | int | float | bool] = None
+    default: str | int | float | bool | None = None
 
     @property
     def required(self) -> bool:
@@ -23,11 +23,11 @@ class CommandMeta(BaseModel):
 
 class ScheduleEntry(BaseModel):
     cron: str
-    run: Optional[str] = None
-    agent_prompt: Optional[str] = None
+    run: str | None = None
+    agent_prompt: str | None = None
 
     @model_validator(mode="after")
-    def check_run_or_agent(self) -> "ScheduleEntry":
+    def check_run_or_agent(self) -> ScheduleEntry:
         if self.run is None and self.agent_prompt is None:
             raise ValueError("ScheduleEntry must have either 'run' or 'agent_prompt'")
         return self
@@ -37,10 +37,10 @@ class CombCell(BaseModel):
     type: str  # "log", "file", "metric", "status", "table", "chart"
     title: str
     source: str
-    key: Optional[str] = None
+    key: str | None = None
 
     @model_validator(mode="after")
-    def check_metric_key(self) -> "CombCell":
+    def check_metric_key(self) -> CombCell:
         if self.type in ("metric", "status") and self.key is None:
             raise ValueError(f"CombCell of type '{self.type}' requires a 'key'")
         return self
