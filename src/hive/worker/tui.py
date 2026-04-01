@@ -9,23 +9,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import logging
+
 from rich.console import Console
 from rich.markdown import Markdown
 
+logger = logging.getLogger(__name__)
+
 from hive.shared.config import WorkerConfig
-from hive.worker.agent import ClaudeAgentRunner
+from hive.worker.agent import DEFAULT_SYSTEM_PROMPT, ClaudeAgentRunner
 from hive.worker.builtin_tools import build_builtin_mcp_server
+from hive.worker.builtins import VALID_INT_KEYS, VALID_KEYS, validate_model_id
 from hive.worker.commands import CommandError, CommandRegistry
 
 TUI_CHAT_ID = 0  # Virtual chat ID; gives TUI its own session slot.
 
-_VALID_INT_KEYS = {"max_turns", "thinking_budget_tokens"}
-_VALID_STR_KEYS = {"model"}
-_VALID_KEYS = _VALID_INT_KEYS | _VALID_STR_KEYS
-
 
 @dataclass
 class _TuiSession:
+    # Typed as ClaudeAgentRunner (not AgentRunner) because the TUI needs
+    # session override methods that only exist on the concrete class.
     agent: ClaudeAgentRunner
     registry: CommandRegistry
     config: WorkerConfig
@@ -35,16 +38,7 @@ class _TuiSession:
 def _build_system_prompt(config: WorkerConfig) -> str:
     if config.agent_system_prompt:
         return config.agent_system_prompt
-    return (
-        "You are a worker agent. Your world is this folder."
-        "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
-        "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
-        "After any such changes, the worker will automatically restart to apply them; "
-        "your conversation session persists across restarts."
-        "\n\nYou also have a set_session_config tool to temporarily override model, "
-        "max_turns, or thinking_budget_tokens for the current conversation. "
-        "These overrides reset on /reset or worker restart."
-    )
+    return DEFAULT_SYSTEM_PROMPT
 
 
 def build_tui_session(config: WorkerConfig) -> _TuiSession:
@@ -130,19 +124,21 @@ async def _tui_set(session: _TuiSession, args_str: str) -> str:
         return "Usage: /set <key> <value>  or  /set reset"
 
     key, value = tokens
-    if key not in _VALID_KEYS:
-        valid = ", ".join(sorted(_VALID_KEYS))
+    if key not in VALID_KEYS:
+        valid = ", ".join(sorted(VALID_KEYS))
         return f"Unknown setting '{key}'. Valid settings: {valid}"
 
-    if key in _VALID_INT_KEYS:
+    if key in VALID_INT_KEYS:
         try:
             parsed_value: Any = int(value)
         except ValueError:
             return f"'{key}' must be an integer."
     else:
         parsed_value = value
-        if key == "model" and not value.startswith("claude-"):
-            return f"Invalid model ID '{value}'. Model must start with 'claude-'."
+        if key == "model":
+            err = validate_model_id(value)
+            if err:
+                return err
 
     session.agent.set_session_override(TUI_CHAT_ID, **{key: parsed_value})
     return f"Session config updated: {key}={parsed_value}. Takes effect from the next message."
@@ -173,8 +169,8 @@ async def _dispatch_worker_command(session: _TuiSession, name: str, args_str: st
     args: dict[str, Any] = {}
     for i, arg_def in enumerate(meta.args):
         if i < len(raw_args):
-            from hive.worker.commands import _cast_arg
-            args[arg_def.name] = _cast_arg(raw_args[i], arg_def.type)
+            from hive.worker.commands import cast_arg
+            args[arg_def.name] = cast_arg(raw_args[i], arg_def.type)
         elif arg_def.default is not None:
             args[arg_def.name] = arg_def.default
 
@@ -304,6 +300,8 @@ async def _run_tui_loop(session: _TuiSession) -> None:
                     result = await _dispatch_worker_command(session, name, args_str)
                     _print_response(console, result)
                 except CommandError as exc:
+                    if exc.stdout.strip():
+                        console.print(exc.stdout.strip())
                     console.print(f"[red]Error:[/red] {exc.stderr.strip()}")
         else:
             before = _snapshot_paths(config.worker_dir)
@@ -318,6 +316,7 @@ async def _run_tui_loop(session: _TuiSession) -> None:
                         "Run [bold]hive restart <path>[/bold] to apply changes."
                     )
             except Exception as exc:
+                logger.debug("Agent error traceback", exc_info=True)
                 console.print(f"[red]Agent error:[/red] {exc}")
 
         await _auto_commit(config.worker_dir)

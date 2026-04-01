@@ -165,9 +165,16 @@ _SET_USAGE = (
     "Overrides reset on /reset or worker restart."
 )
 
-_VALID_INT_KEYS = {"max_turns", "thinking_budget_tokens"}
-_VALID_STR_KEYS = {"model"}
-_VALID_KEYS = _VALID_INT_KEYS | _VALID_STR_KEYS
+VALID_INT_KEYS = {"max_turns", "thinking_budget_tokens"}
+VALID_STR_KEYS = {"model"}
+VALID_KEYS = VALID_INT_KEYS | VALID_STR_KEYS
+
+
+def validate_model_id(value: str) -> str | None:
+    """Return an error message if *value* is not a valid model ID, else None."""
+    if not value.startswith("claude-"):
+        return f"Invalid model ID '{value}'. Model must start with 'claude-'."
+    return None
 
 
 def make_set_handler(agent_runner: ClaudeAgentRunner, allowed_user_ids: list[int]):
@@ -199,15 +206,15 @@ def make_set_handler(agent_runner: ClaudeAgentRunner, allowed_user_ids: list[int
             return
 
         key, value = tokens
-        if key not in _VALID_KEYS:
-            valid = ", ".join(sorted(_VALID_KEYS))
+        if key not in VALID_KEYS:
+            valid = ", ".join(sorted(VALID_KEYS))
             await update.message.reply_text(
                 f"Unknown setting <code>{key}</code>. Valid settings: {valid}",
                 parse_mode="HTML",
             )
             return
 
-        if key in _VALID_INT_KEYS:
+        if key in VALID_INT_KEYS:
             try:
                 parsed_value = int(value)
             except ValueError:
@@ -217,12 +224,11 @@ def make_set_handler(agent_runner: ClaudeAgentRunner, allowed_user_ids: list[int
                 return
         else:
             parsed_value = value
-            if key == "model" and not value.startswith("claude-"):
-                await update.message.reply_text(
-                    f"Invalid model ID <code>{value}</code>. Model must start with <code>claude-</code>.",
-                    parse_mode="HTML",
-                )
-                return
+            if key == "model":
+                err = validate_model_id(value)
+                if err:
+                    await update.message.reply_text(err, parse_mode="HTML")
+                    return
 
         agent_runner.set_session_override(chat_id, **{key: parsed_value})
         await update.message.reply_text(

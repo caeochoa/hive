@@ -23,7 +23,7 @@ from hive.worker.builtins import (
     make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
-from hive.worker.agent import ClaudeAgentRunner
+from hive.worker.agent import DEFAULT_SYSTEM_PROMPT, ClaudeAgentRunner
 from hive.worker.builtin_tools import build_builtin_mcp_server
 from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
 
@@ -67,16 +67,7 @@ class WorkerRuntime:
         """Build the agent system prompt, appending self-config instructions only when no custom prompt is set."""
         if self._config.agent_system_prompt:
             return self._config.agent_system_prompt
-        return (
-            "You are a worker agent. Your world is this folder."
-            "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
-            "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
-            "After any such changes, the worker will automatically restart to apply them; "
-            "your conversation session persists across restarts."
-            "\n\nYou also have a set_session_config tool to temporarily override model, "
-            "max_turns, or thinking_budget_tokens for the current conversation. "
-            "These overrides reset on /reset or worker restart."
-        )
+        return DEFAULT_SYSTEM_PROMPT
 
     async def start(self) -> None:
         """Full startup sequence.
