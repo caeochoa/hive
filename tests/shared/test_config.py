@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from hive.shared.config import load_worker_config, ConfigError
+from hive.shared.config import load_worker_config, load_worker_config_for_tui, ConfigError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -76,3 +76,30 @@ def test_thinking_budget_tokens_from_toml(tmp_path):
     (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
     config = load_worker_config(tmp_path)
     assert config.agent_thinking_budget_tokens == 5000
+
+
+# ---------------------------------------------------------------------------
+# load_worker_config_for_tui
+# ---------------------------------------------------------------------------
+
+
+def test_tui_config_works_without_telegram_keys(tmp_path):
+    """TUI config loader works when .env has no Telegram keys."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "tui-test"\n')
+    config = load_worker_config_for_tui(tmp_path)
+    assert config.name == "tui-test"
+    assert config.telegram_bot_token == ""
+    assert config.telegram_allowed_user_ids == []
+
+
+def test_tui_and_full_config_identical_with_telegram_keys(tmp_path):
+    """Both loaders return identical results when Telegram keys are present."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "both"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=42\n")
+    full = load_worker_config(tmp_path)
+    tui = load_worker_config_for_tui(tmp_path)
+    assert full.name == tui.name
+    assert full.telegram_bot_token == tui.telegram_bot_token
+    assert full.telegram_allowed_user_ids == tui.telegram_allowed_user_ids
+    assert full.agent_model == tui.agent_model
+    assert full.agent_max_turns == tui.agent_max_turns

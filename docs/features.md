@@ -139,6 +139,22 @@ Every Worker gets these slash commands automatically — no configuration needed
 
 ---
 
+## TUI Chat
+
+Interact with any Worker directly from your terminal without Telegram:
+
+```bash
+hive chat ./my-worker
+```
+
+The TUI is a REPL that supports all built-in commands (`/reset`, `/help`, `/menu`, `/set`) plus worker commands. Natural language messages are routed to the same agent. Telegram credentials are not required.
+
+Use `/exit` or `Ctrl-C` to quit.
+
+> See also: [CLI reference — `hive chat`](cli/README.md#hive-chat-path)
+
+---
+
 ## Dashboard (Comb)
 
 A config-driven web dashboard served at `http://localhost:8080/workers/<name>`. Define cells in the `[comb]` section of `hive.toml`:

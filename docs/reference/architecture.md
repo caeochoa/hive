@@ -67,6 +67,8 @@ Each `hive run <path>` process runs a single async event loop with four subsyste
 
 **Scheduler** (APScheduler) runs as a parallel async task in the same process, firing scripts or agent prompts on cron schedule. supervisord's `autorestart=true` handles crash recovery for the whole process.
 
+**TUI mode:** `hive chat <path>` provides the same agent and command dispatch in a terminal REPL, without Telegram. It uses a virtual chat ID for session tracking and skips Telegram auth. Config change detection warns the user but does not auto-restart (unlike the Telegram runtime).
+
 Command system detail: [`../commands/README.md`](../commands/README.md). Agent detail: [`../agent/README.md`](../agent/README.md). Scheduling detail: [`../scheduling/README.md`](../scheduling/README.md).
 
 ---

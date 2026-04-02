@@ -10,7 +10,7 @@ import pytest
 
 from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandArg, CommandMeta
-from hive.worker.commands import CommandError, CommandRegistry, _cast_arg
+from hive.worker.commands import CommandError, CommandRegistry, cast_arg
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +338,13 @@ class TestCommandError:
     def test_stderr_attribute(self) -> None:
         err = CommandError("bad stuff")
         assert err.stderr == "bad stuff"
+        assert err.stdout == ""
         assert str(err) == "bad stuff"
+
+    def test_stdout_attribute(self) -> None:
+        err = CommandError("bad stuff", stdout="partial output")
+        assert err.stderr == "bad stuff"
+        assert err.stdout == "partial output"
 
 
 # ---------------------------------------------------------------------------
@@ -348,16 +354,16 @@ class TestCommandError:
 
 class TestCastArg:
     def test_int(self) -> None:
-        assert _cast_arg("42", "int") == 42
+        assert cast_arg("42", "int") == 42
 
     def test_float(self) -> None:
-        assert _cast_arg("3.14", "float") == pytest.approx(3.14)
+        assert cast_arg("3.14", "float") == pytest.approx(3.14)
 
     def test_bool_true(self) -> None:
-        assert _cast_arg("true", "bool") is True
+        assert cast_arg("true", "bool") is True
 
     def test_bool_false(self) -> None:
-        assert _cast_arg("no", "bool") is False
+        assert cast_arg("no", "bool") is False
 
     def test_str(self) -> None:
-        assert _cast_arg("hello", "str") == "hello"
+        assert cast_arg("hello", "str") == "hello"

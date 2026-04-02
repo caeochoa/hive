@@ -26,8 +26,9 @@ _DOCSTRING_RE = re.compile(r'^\s*"""(.*?)"""', re.DOTALL)
 class CommandError(Exception):
     """Raised when a command script exits with a non-zero status."""
 
-    def __init__(self, stderr: str) -> None:
+    def __init__(self, stderr: str, stdout: str = "") -> None:
         self.stderr = stderr
+        self.stdout = stdout
         super().__init__(stderr)
 
 
@@ -117,7 +118,10 @@ class CommandRegistry:
         stdout, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            raise CommandError(stderr.decode("utf-8", errors="replace"))
+            raise CommandError(
+                stderr.decode("utf-8", errors="replace"),
+                stdout.decode("utf-8", errors="replace"),
+            )
 
         result = stdout.decode("utf-8", errors="replace")
         logger.info("Command %r returned %d chars", meta.name, len(result))
@@ -151,7 +155,7 @@ class CommandRegistry:
                     if is_last and arg_def.type == "str" and len(telegram_args) > i + 1:
                         args[arg_def.name] = " ".join(telegram_args[i:])
                     else:
-                        args[arg_def.name] = _cast_arg(telegram_args[i], arg_def.type)
+                        args[arg_def.name] = cast_arg(telegram_args[i], arg_def.type)
                 elif arg_def.default is not None:
                     args[arg_def.name] = arg_def.default
                 # If required and not provided, skip — script will error
@@ -233,7 +237,7 @@ class CommandRegistry:
         return create_sdk_mcp_server("commands", tools=tools)
 
 
-def _cast_arg(value: str, type_name: str) -> str | int | float | bool:
+def cast_arg(value: str, type_name: str) -> str | int | float | bool:
     """Cast a string argument to the declared type."""
     match type_name:
         case "int":

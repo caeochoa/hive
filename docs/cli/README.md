@@ -103,6 +103,20 @@ hive logs <path> -n 200 -f
 
 Press `Ctrl+C` to stop following.
 
+## `hive chat <path>`
+
+Open an interactive TUI chat session with a Worker. Talk to the agent and run commands directly from the terminal — no Telegram bot required.
+
+```
+hive chat <path>
+```
+
+The TUI supports the same built-in commands as Telegram (`/reset`, `/help`, `/menu`, `/set`) plus `/exit` and `/quit` to leave. Worker commands from `commands/` are available as slash commands.
+
+Telegram credentials (`.env` keys `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`) are optional for `hive chat` — it works without any Telegram configuration.
+
+The agent, session overrides, auto-commit, and config change detection all work the same as in the Telegram runtime. Markdown responses are rendered with Rich.
+
 ## `hive run <path>`
 
 Internal command. This is the Worker entrypoint called by supervisord; it boots the `WorkerRuntime` and runs the async event loop.

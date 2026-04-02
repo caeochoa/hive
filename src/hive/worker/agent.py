@@ -16,6 +16,17 @@ from hive.shared.models import AgentSession
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a worker agent. Your world is this folder."
+    "\n\nYou may modify hive.toml to change your configuration (model, schedules, "
+    "comb cells, etc.) and create or edit files in commands/ to add or update your tools. "
+    "After any such changes, the worker will automatically restart to apply them; "
+    "your conversation session persists across restarts."
+    "\n\nYou also have a set_session_config tool to temporarily override model, "
+    "max_turns, or thinking_budget_tokens for the current conversation. "
+    "These overrides reset on /reset or worker restart."
+)
+
 # ContextVar set by _run_interactive so builtin MCP tools can identify the caller.
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
 

@@ -53,6 +53,8 @@ Each Telegram chat ID maps to a persistent agent session. Sessions are stored in
 
 The sessions file is auto-committed to the worker git repo after each agent turn.
 
+**TUI sessions:** `hive chat` uses the same session system with a virtual chat ID (`tui-local`). TUI sessions are stored in the same `memory/.sessions.json` file and persist across TUI invocations.
+
 ---
 
 ## 4. Session Overrides
