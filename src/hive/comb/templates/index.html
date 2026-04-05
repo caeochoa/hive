@@ -8,7 +8,7 @@
 body[data-theme="terminal-dark"] {
   --bg: #0d1117; --surface: #161b22; --border: #30363d;
   --text: #e6edf3; --text-muted: #8b949e; --accent: #58a6ff;
-  --status-ok: #3fb950; --shadow: none;
+  --status-ok: #3fb950; --status-off: #6e7681; --shadow: none;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -28,8 +28,11 @@ a:hover { text-decoration: underline; }
   box-shadow: var(--shadow); transition: border-color 0.15s;
 }
 .worker-card:hover { border-color: var(--accent); }
-.worker-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); flex-shrink: 0; }
+.worker-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.worker-dot.online { background: var(--status-ok); }
+.worker-dot.offline { background: var(--status-off); }
 .worker-name { font-size: 0.9rem; font-weight: 500; }
+.worker-port { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; }
 .empty { color: var(--text-muted); font-size: 0.85rem; }
 </style>
 </head>
@@ -37,10 +40,11 @@ a:hover { text-decoration: underline; }
 <h1>Hive Comb</h1>
 <p class="subtitle">{{ workers|length }} worker{% if workers|length != 1 %}s{% endif %} registered</p>
 <div class="worker-list">
-{% for name in workers %}
+{% for name, port in workers.items() %}
 <a href="/workers/{{ name }}" class="worker-card">
-  <span class="worker-dot"></span>
+  <span class="worker-dot {% if port %}online{% else %}offline{% endif %}"></span>
   <span class="worker-name">{{ name }}</span>
+  <span class="worker-port">{% if port %}:{{ port }}{% else %}no dashboard{% endif %}</span>
 </a>
 {% else %}
 <p class="empty">No workers registered yet. Run <code>hive init</code> to get started.</p>
