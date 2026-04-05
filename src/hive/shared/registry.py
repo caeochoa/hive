@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Optional
+
 from hive.shared.models import WorkerEntry
 
 DEFAULT_REGISTRY_PATH = Path.home() / ".config" / "hive" / "workers.json"
@@ -33,7 +34,7 @@ class HiveRegistry:
         entries = self._load()
         self._save([e for e in entries if e.name != name])
 
-    def get(self, name: str) -> Optional[WorkerEntry]:
+    def get(self, name: str) -> WorkerEntry | None:
         for e in self._load():
             if e.name == name:
                 return e

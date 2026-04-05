@@ -8,12 +8,19 @@ import os
 import signal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 from telegram import BotCommand
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from hive.shared.config import WorkerConfig
+from hive.worker.agent import DEFAULT_SYSTEM_PROMPT, ClaudeAgentRunner
+from hive.worker.builtin_tools import build_builtin_mcp_server
 from hive.worker.builtins import (
     BUILTIN_NAMES,
     make_callback_handler,
@@ -23,13 +30,7 @@ from hive.worker.builtins import (
     make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
-from hive.worker.agent import DEFAULT_SYSTEM_PROMPT, ClaudeAgentRunner
-from hive.worker.builtin_tools import build_builtin_mcp_server
-from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
-
-if TYPE_CHECKING:
-    from telegram import Update
-    from telegram.ext import ContextTypes
+from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
 

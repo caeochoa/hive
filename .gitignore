@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
+.superpowers/
+create-worker-workspace/
+docs/superpowers/

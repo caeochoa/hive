@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import logging
-
 from rich.console import Console
 from rich.markdown import Markdown
-
-logger = logging.getLogger(__name__)
 
 from hive.shared.config import WorkerConfig
 from hive.worker.agent import DEFAULT_SYSTEM_PROMPT, ClaudeAgentRunner
 from hive.worker.builtin_tools import build_builtin_mcp_server
 from hive.worker.builtins import VALID_INT_KEYS, VALID_KEYS, validate_model_id
 from hive.worker.commands import CommandError, CommandRegistry
+
+logger = logging.getLogger(__name__)
 
 TUI_CHAT_ID = 0  # Virtual chat ID; gives TUI its own session slot.
 
