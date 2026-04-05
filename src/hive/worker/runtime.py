@@ -8,7 +8,6 @@ import os
 import signal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 from telegram import BotCommand
 from telegram.ext import (
@@ -32,9 +31,6 @@ from hive.worker.builtins import (
 )
 from hive.worker.commands import CommandRegistry
 from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
