@@ -1,4 +1,5 @@
 from __future__ import annotations
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -103,8 +104,6 @@ def write_comb_block(conf_dir: Path = DEFAULT_CONF_DIR) -> None:
 
 def install_launchagent() -> bool:
     """Install macOS LaunchAgent for supervisord. Returns True if newly installed."""
-    import shutil
-
     newly_written = False
     if not LAUNCHAGENT_PLIST.exists():
         supervisord_bin = shutil.which("supervisord")
