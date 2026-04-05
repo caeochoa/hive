@@ -120,7 +120,9 @@ def install_launchagent() -> bool:
         newly_written = True
 
     # -w ensures the service is marked enabled so it auto-loads after reboots
-    subprocess.run(["launchctl", "load", "-w", str(LAUNCHAGENT_PLIST)])
+    result = subprocess.run(["launchctl", "load", "-w", str(LAUNCHAGENT_PLIST)])
+    if result.returncode != 0:
+        raise RuntimeError(f"launchctl load -w failed (exit {result.returncode})")
     return newly_written
 
 
