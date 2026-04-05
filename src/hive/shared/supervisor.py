@@ -37,6 +37,17 @@ stdout_logfile={path}/logs/out.log
 stderr_logfile={path}/logs/err.log
 """
 
+COMB_APP_BLOCK_TEMPLATE = """\
+[program:comb-{name}]
+command=streamlit run {app_path} --server.port {port} --server.headless true
+directory={worker_dir}
+environment=WORKER_DIR="{worker_dir}"
+autostart=true
+autorestart=true
+stdout_logfile={worker_dir}/logs/comb.log
+stderr_logfile={worker_dir}/logs/comb.err.log
+"""
+
 COMB_BLOCK_TEMPLATE = """\
 [program:hive-comb]
 command=hive comb serve --host 0.0.0.0
@@ -83,6 +94,35 @@ def write_worker_block(name: str, worker_path: Path, conf_dir: Path = DEFAULT_CO
 
 def remove_worker_block(name: str, conf_dir: Path = DEFAULT_CONF_DIR) -> None:
     conf_file = get_worker_conf_path(name, conf_dir)
+    if conf_file.exists():
+        conf_file.unlink()
+
+
+def get_comb_app_conf_path(name: str, conf_dir: Path = DEFAULT_CONF_DIR) -> Path:
+    return conf_dir / f"comb-{name}.conf"
+
+
+def write_comb_app_block(
+    name: str,
+    worker_path: Path,
+    app_path: Path,
+    port: int,
+    conf_dir: Path = DEFAULT_CONF_DIR,
+) -> None:
+    conf_dir.mkdir(parents=True, exist_ok=True)
+    conf_file = get_comb_app_conf_path(name, conf_dir)
+    conf_file.write_text(
+        COMB_APP_BLOCK_TEMPLATE.format(
+            name=name,
+            app_path=str(app_path),
+            port=port,
+            worker_dir=str(worker_path),
+        )
+    )
+
+
+def remove_comb_app_block(name: str, conf_dir: Path = DEFAULT_CONF_DIR) -> None:
+    conf_file = get_comb_app_conf_path(name, conf_dir)
     if conf_file.exists():
         conf_file.unlink()
 

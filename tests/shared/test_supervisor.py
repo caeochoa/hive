@@ -4,6 +4,9 @@ from hive.shared.supervisor import (
     write_worker_block,
     remove_worker_block,
     get_worker_conf_path,
+    write_comb_app_block,
+    remove_comb_app_block,
+    get_comb_app_conf_path,
 )
 
 
@@ -49,3 +52,62 @@ def test_remove_nonexistent_is_noop(conf_dir):
 def test_get_worker_conf_path(conf_dir):
     path = get_worker_conf_path("budget", conf_dir=conf_dir)
     assert path.name == "worker-budget.conf"
+
+
+def test_write_comb_app_block(conf_dir):
+    write_comb_app_block(
+        name="budget",
+        worker_path=Path("/home/user/budget"),
+        app_path=Path("/home/user/budget/dashboard/app.py"),
+        port=8501,
+        conf_dir=conf_dir,
+    )
+    conf_file = conf_dir / "comb-budget.conf"
+    assert conf_file.exists()
+    content = conf_file.read_text()
+    assert "[program:comb-budget]" in content
+    assert "streamlit run /home/user/budget/dashboard/app.py" in content
+    assert "--server.port 8501" in content
+    assert "--server.headless true" in content
+    assert "autorestart=true" in content
+    assert 'WORKER_DIR="/home/user/budget"' in content
+
+
+def test_write_comb_app_block_idempotent(conf_dir):
+    write_comb_app_block(
+        "budget",
+        Path("/home/user/budget"),
+        Path("/home/user/budget/dashboard/app.py"),
+        8501,
+        conf_dir=conf_dir,
+    )
+    write_comb_app_block(
+        "budget",
+        Path("/home/user/budget"),
+        Path("/home/user/budget/dashboard/app.py"),
+        8501,
+        conf_dir=conf_dir,
+    )
+    files = list(conf_dir.glob("*.conf"))
+    assert len(files) == 1
+
+
+def test_remove_comb_app_block(conf_dir):
+    write_comb_app_block(
+        "budget",
+        Path("/home/user/budget"),
+        Path("/home/user/budget/dashboard/app.py"),
+        8501,
+        conf_dir=conf_dir,
+    )
+    remove_comb_app_block("budget", conf_dir=conf_dir)
+    assert not (conf_dir / "comb-budget.conf").exists()
+
+
+def test_remove_comb_app_block_nonexistent_is_noop(conf_dir):
+    remove_comb_app_block("nonexistent", conf_dir=conf_dir)  # should not raise
+
+
+def test_get_comb_app_conf_path(conf_dir):
+    path = get_comb_app_conf_path("budget", conf_dir=conf_dir)
+    assert path.name == "comb-budget.conf"
