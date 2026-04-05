@@ -36,6 +36,7 @@ logs/
 __pycache__/
 *.tmp
 .DS_Store
+.streamlit/
 """
 
 REQUIREMENTS_TEMPLATE = """\
@@ -149,6 +150,8 @@ def start(path: str = typer.Argument(..., help="Path to Worker folder")) -> None
         port = _find_free_port()
         write_comb_app_block(name, worker_dir, app_path, port)
         registry.register(name, str(worker_dir), comb_port=port)
+        from hive.comb.themes import write_streamlit_theme
+        write_streamlit_theme(worker_dir, config.comb_theme)
         reload_supervisord()
         comb_result = supervisorctl("start", f"comb-{name}")
         comb_msg = comb_result.stdout.strip() if comb_result.stdout else f"Started comb-{name} on port {port}"
