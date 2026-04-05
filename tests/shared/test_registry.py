@@ -51,3 +51,45 @@ def test_persists_to_disk(tmp_path):
 
     r2 = HiveRegistry(registry_path=path)
     assert len(r2.list_workers()) == 1
+
+
+def test_register_with_comb_port(registry):
+    registry.register("budget", "/home/user/budget", comb_port=8501)
+    entry = registry.get("budget")
+    assert entry is not None
+    assert entry.comb_port == 8501
+
+
+def test_register_without_comb_port_defaults_to_none(registry):
+    registry.register("budget", "/home/user/budget")
+    entry = registry.get("budget")
+    assert entry is not None
+    assert entry.comb_port is None
+
+
+def test_get_comb_port_returns_port(registry):
+    registry.register("budget", "/home/user/budget", comb_port=8501)
+    port = registry.get_comb_port("budget")
+    assert port == 8501
+
+
+def test_get_comb_port_returns_none_when_not_set(registry):
+    registry.register("budget", "/home/user/budget")
+    port = registry.get_comb_port("budget")
+    assert port is None
+
+
+def test_get_comb_port_returns_none_for_nonexistent_worker(registry):
+    port = registry.get_comb_port("nonexistent")
+    assert port is None
+
+
+def test_comb_port_persists_to_disk(tmp_path):
+    path = tmp_path / "workers.json"
+    r1 = HiveRegistry(registry_path=path)
+    r1.register("budget", "/home/user/budget", comb_port=8501)
+
+    r2 = HiveRegistry(registry_path=path)
+    entry = r2.get("budget")
+    assert entry is not None
+    assert entry.comb_port == 8501

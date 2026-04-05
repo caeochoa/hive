@@ -54,3 +54,4 @@ class AgentSession(BaseModel):
 class WorkerEntry(BaseModel):
     name: str
     path: str
+    comb_port: int | None = None

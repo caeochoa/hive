@@ -24,10 +24,10 @@ class HiveRegistry:
         with open(self._path, "w") as f:
             json.dump([e.model_dump() for e in entries], f, indent=2)
 
-    def register(self, name: str, path: str) -> None:
+    def register(self, name: str, path: str, comb_port: int | None = None) -> None:
         entries = self._load()
         entries = [e for e in entries if e.name != name]
-        entries.append(WorkerEntry(name=name, path=path))
+        entries.append(WorkerEntry(name=name, path=path, comb_port=comb_port))
         self._save(entries)
 
     def unregister(self, name: str) -> None:
@@ -39,6 +39,10 @@ class HiveRegistry:
             if e.name == name:
                 return e
         return None
+
+    def get_comb_port(self, name: str) -> int | None:
+        entry = self.get(name)
+        return entry.comb_port if entry else None
 
     def list_workers(self) -> list[WorkerEntry]:
         return self._load()
