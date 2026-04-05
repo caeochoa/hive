@@ -79,6 +79,7 @@ Rules:
 
 To revert all overrides to `hive.toml` defaults: **`/set reset`**
 
+
 ### Via `set_session_config` MCP tool (agent-initiated)
 
 The agent may call this tool during a conversation to adjust its own behavior. Parameters are all optional:

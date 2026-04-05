@@ -4,6 +4,7 @@ Workers support cron-scheduled tasks defined in `hive.toml`. Each entry fires in
 
 > **Note:** Scheduled jobs do not trigger config reload or auto-restart. If you update `hive.toml` while the Worker is running, use `hive restart <path>` to apply changes manually.
 
+
 ## TOML format
 
 Add one or more `[[schedule]]` tables to `hive.toml`. Each entry requires a `cron` field plus exactly one of `run` or `agent_prompt`.

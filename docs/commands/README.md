@@ -144,6 +144,7 @@ Set `WORKER_DIR` manually if the script reads from the Worker folder:
 WORKER_DIR=$(pwd) .venv/bin/python commands/status.py --lines 10
 ```
 
+
 ## Troubleshooting
 
 If a command isn't appearing in `/help` or isn't available as an agent tool, see [Troubleshooting → Command not appearing](../guides/troubleshooting.md#command-not-appearing-in-help-or-not-working).

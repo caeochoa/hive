@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Hive** is a local-first framework for spinning up purpose-built Telegram bots called **Workers**. The central philosophy is **one folder = one world**: a Worker folder contains all its config, scripts, memory, and logs; Hive provides the shared infrastructure that runs them.
 
 Key docs:
+
 - `docs/reference/SPEC.md` — evergreen scope document: vocabulary, design philosophy, and architectural rationale
 - `docs/reference/architecture.md` — diagrams (two-layer model, message routing), supervisord setup, worker folder structure, self-config edge cases
 - `docs/features.md` — capability reference for worker developers; what Hive can do
@@ -39,6 +40,7 @@ The `hive` CLI entry point is defined in `pyproject.toml` → `hive:main` → `s
 ### Worker runtime model
 
 Each `hive run <path>` process runs a single async event loop:
+
 - Routes slash commands to `commands/` scripts (run as subprocesses in the Worker's `.venv`)
 - Routes natural language messages to the Claude Agent SDK
 - Runs scheduled tasks (APScheduler, same process)
@@ -66,6 +68,7 @@ args:
 ```
 
 **Execution contract:**
+
 - Hive invokes scripts as: `.venv/bin/python commands/<script>.py [--arg value | --flag]`
 - Scripts may have a shebang line (`#!`) — Hive skips it when parsing docstrings
 - `bool` args are passed as flags (`--name` only, no value); other types as `--name value`
@@ -78,6 +81,7 @@ At startup, Hive scans `commands/`, parses docstrings, and registers both Telegr
 ### Agent design
 
 Powered by the **Claude Agent SDK** (`claude-agent-sdk`). Key design points:
+
 - Scoped to the Worker folder via `cwd` parameter
 - Built-in filesystem tools: `Read`, `Write`, `Bash`, `Glob`
 - `commands/` scripts exposed as tools via in-process MCP server (`commands` key)
