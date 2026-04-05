@@ -243,3 +243,117 @@ class TestRun:
     def test_run_fails_on_bad_config(self, tmp_path):
         result = runner.invoke(app, ["run", str(tmp_path)])
         assert result.exit_code == 1
+
+
+class TestStartComb:
+    def test_start_with_comb_starts_comb_process(self, tmp_path):
+        (tmp_path / "hive.toml").write_text(
+            '[worker]\nname = "myworker"\n\n[comb]\ncells = [{type = "log", title = "Logs", source = "logs/out.log"}]\n'
+        )
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        mock_supervisorctl = MagicMock(return_value=MagicMock(stdout="started"))
+
+        with (
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch("hive.shared.supervisor.write_worker_block"),
+            patch("hive.shared.supervisor.supervisorctl", mock_supervisorctl),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+            patch("hive.shared.supervisor.write_comb_app_block") as mock_write_comb,
+            patch("hive.cli.app._find_free_port", return_value=8501),
+        ):
+            result = runner.invoke(app, ["start", str(tmp_path)])
+
+        assert result.exit_code == 0
+        mock_write_comb.assert_called_once()
+        # Verify supervisorctl was called with comb-myworker start
+        calls = [str(c) for c in mock_supervisorctl.call_args_list]
+        assert any("comb-myworker" in c for c in calls)
+
+    def test_start_without_comb_skips_comb_process(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "myworker"\n')
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        mock_supervisorctl = MagicMock(return_value=MagicMock(stdout="started"))
+
+        with (
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch("hive.shared.supervisor.write_worker_block"),
+            patch("hive.shared.supervisor.supervisorctl", mock_supervisorctl),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+            patch("hive.shared.supervisor.write_comb_app_block") as mock_write_comb,
+        ):
+            result = runner.invoke(app, ["start", str(tmp_path)])
+
+        assert result.exit_code == 0
+        mock_write_comb.assert_not_called()
+        calls = [str(c) for c in mock_supervisorctl.call_args_list]
+        assert not any("comb-myworker" in c for c in calls)
+
+
+class TestStopComb:
+    def test_stop_with_comb_stops_comb_process(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "myworker"\n')
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+        mock_registry.get_comb_port.return_value = 8501
+        mock_supervisorctl = MagicMock(return_value=MagicMock(stdout="stopped"))
+
+        with (
+            patch("hive.shared.supervisor.supervisorctl", mock_supervisorctl),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+            patch("hive.shared.supervisor.get_comb_app_conf_path"),
+        ):
+            result = runner.invoke(app, ["stop", str(tmp_path)])
+
+        assert result.exit_code == 0
+        calls = [str(c) for c in mock_supervisorctl.call_args_list]
+        assert any("comb-myworker" in c for c in calls)
+
+    def test_stop_without_comb_skips_comb_stop(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "myworker"\n')
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+        mock_registry.get_comb_port.return_value = None
+        mock_supervisorctl = MagicMock(return_value=MagicMock(stdout="stopped"))
+
+        with (
+            patch("hive.shared.supervisor.supervisorctl", mock_supervisorctl),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["stop", str(tmp_path)])
+
+        assert result.exit_code == 0
+        calls = [str(c) for c in mock_supervisorctl.call_args_list]
+        assert not any("comb-myworker" in c for c in calls)
+
+
+class TestRemoveComb:
+    def test_remove_calls_remove_comb_app_block(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "myworker"\n')
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+
+        with (
+            patch("hive.shared.supervisor.supervisorctl"),
+            patch("hive.shared.supervisor.remove_worker_block"),
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch("hive.shared.supervisor.remove_comb_app_block") as mock_remove_comb,
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["remove", str(tmp_path)])
+
+        assert result.exit_code == 0
+        mock_remove_comb.assert_called_once_with("myworker")

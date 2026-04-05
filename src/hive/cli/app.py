@@ -137,6 +137,23 @@ def start(path: str = typer.Argument(..., help="Path to Worker folder")) -> None
     result = supervisorctl("start", f"worker-{name}")
     typer.echo(result.stdout.strip() if result.stdout else f"Started worker-{name}")
 
+    # Start per-worker Streamlit dashboard if [comb] is configured
+    if config.comb_cells:
+        from hive.shared.supervisor import write_comb_app_block
+        import importlib.util
+        _spec = importlib.util.find_spec("hive.comb.default_app")
+        default_app_path = Path(_spec.origin).resolve()
+        worker_app_path = worker_dir / "dashboard" / "app.py"
+        app_path = worker_app_path if worker_app_path.exists() else default_app_path
+
+        port = _find_free_port()
+        write_comb_app_block(name, worker_dir, app_path, port)
+        registry.register(name, str(worker_dir), comb_port=port)
+        reload_supervisord()
+        comb_result = supervisorctl("start", f"comb-{name}")
+        comb_msg = comb_result.stdout.strip() if comb_result.stdout else f"Started comb-{name} on port {port}"
+        typer.echo(comb_msg)
+
 
 @app.command()
 def stop(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
@@ -154,6 +171,14 @@ def stop(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     result = supervisorctl("stop", f"worker-{config.name}")
     typer.echo(result.stdout.strip() if result.stdout else f"Stopped worker-{config.name}")
 
+    # Stop comb process if registered
+    from hive.shared.registry import HiveRegistry as _HiveRegistry
+    from hive.shared.supervisor import get_comb_app_conf_path
+    _registry = _HiveRegistry()
+    if _registry.get_comb_port(config.name) is not None:
+        comb_result = supervisorctl("stop", f"comb-{config.name}")
+        typer.echo(comb_result.stdout.strip() if comb_result.stdout else f"Stopped comb-{config.name}")
+
 
 @app.command()
 def restart(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
@@ -170,6 +195,13 @@ def restart(path: str = typer.Argument(..., help="Path to Worker folder")) -> No
 
     result = supervisorctl("restart", f"worker-{config.name}")
     typer.echo(result.stdout.strip() if result.stdout else f"Restarted worker-{config.name}")
+
+    # Restart comb process if registered
+    from hive.shared.registry import HiveRegistry as _HiveRegistry
+    _registry = _HiveRegistry()
+    if _registry.get_comb_port(config.name) is not None:
+        comb_result = supervisorctl("restart", f"comb-{config.name}")
+        typer.echo(comb_result.stdout.strip() if comb_result.stdout else f"Restarted comb-{config.name}")
 
 
 @app.command()
@@ -197,6 +229,11 @@ def remove(
     supervisorctl("stop", f"worker-{name}")
     remove_worker_block(name)
     HiveRegistry().unregister(name)
+
+    # Remove comb supervisord block if it exists
+    from hive.shared.supervisor import remove_comb_app_block
+    remove_comb_app_block(name)
+
     reload_supervisord()
 
     typer.echo(f"Worker '{name}' unregistered")
@@ -329,6 +366,19 @@ def comb_restart() -> None:
     reload_supervisord()
     result = supervisorctl("restart", "hive-comb")
     typer.echo(result.stdout.strip() if result.stdout else "Restarted hive-comb")
+
+
+def _find_free_port(start: int = 8501) -> int:
+    """Find a free TCP port starting from start."""
+    import socket
+    port = start
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("", port))
+                return port
+            except OSError:
+                port += 1
 
 
 def _write_if_missing(path: Path, content: str) -> None:
