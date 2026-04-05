@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -104,21 +105,25 @@ def write_comb_block(conf_dir: Path = DEFAULT_CONF_DIR) -> None:
 
 def install_launchagent() -> bool:
     """Install macOS LaunchAgent for supervisord. Returns True if newly installed."""
-    if LAUNCHAGENT_PLIST.exists():
-        return False
-    import shutil
-    supervisord_bin = shutil.which("supervisord")
-    if not supervisord_bin:
-        raise RuntimeError("supervisord not found in PATH")
-    LAUNCHAGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
-    LAUNCHAGENT_PLIST.write_text(
-        LAUNCHAGENT_TEMPLATE.format(
-            supervisord=supervisord_bin,
-            conf=str(SUPERVISORD_CONF),
+    newly_written = False
+    if not LAUNCHAGENT_PLIST.exists():
+        supervisord_bin = shutil.which("supervisord")
+        if not supervisord_bin:
+            raise RuntimeError("supervisord not found in PATH")
+        LAUNCHAGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+        LAUNCHAGENT_PLIST.write_text(
+            LAUNCHAGENT_TEMPLATE.format(
+                supervisord=supervisord_bin,
+                conf=str(SUPERVISORD_CONF),
+            )
         )
-    )
-    subprocess.run(["launchctl", "load", str(LAUNCHAGENT_PLIST)], check=True)
-    return True
+        newly_written = True
+
+    # -w ensures the service is marked enabled so it auto-loads after reboots
+    result = subprocess.run(["launchctl", "load", "-w", str(LAUNCHAGENT_PLIST)])
+    if result.returncode != 0:
+        raise RuntimeError(f"launchctl load -w failed (exit {result.returncode})")
+    return newly_written
 
 
 def supervisorctl(*args: str) -> subprocess.CompletedProcess:
@@ -128,8 +133,14 @@ def supervisorctl(*args: str) -> subprocess.CompletedProcess:
 
 
 def is_launchagent_installed() -> bool:
-    """Check if the macOS LaunchAgent plist exists."""
-    return LAUNCHAGENT_PLIST.exists()
+    """Check if the macOS LaunchAgent plist exists and is bootstrapped."""
+    if not LAUNCHAGENT_PLIST.exists():
+        return False
+    result = subprocess.run(
+        ["launchctl", "list", "com.hive.supervisord"],
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def reload_supervisord() -> None:
