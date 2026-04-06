@@ -140,8 +140,9 @@ def start(path: str = typer.Argument(..., help="Path to Worker folder")) -> None
 
     # Start per-worker Streamlit dashboard if [comb] is configured
     if config.comb_cells:
-        from hive.shared.supervisor import write_comb_app_block
         import importlib.util
+
+        from hive.shared.supervisor import write_comb_app_block
         _spec = importlib.util.find_spec("hive.comb.default_app")
         default_app_path = Path(_spec.origin).resolve()
         worker_app_path = worker_dir / "dashboard" / "app.py"
@@ -176,7 +177,7 @@ def stop(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
 
     # Stop comb process if registered
     from hive.shared.registry import HiveRegistry as _HiveRegistry
-    from hive.shared.supervisor import get_comb_app_conf_path
+
     _registry = _HiveRegistry()
     if _registry.get_comb_port(config.name) is not None:
         comb_result = supervisorctl("stop", f"comb-{config.name}")

@@ -30,7 +30,7 @@ except Exception as e:
     st.error(f"Failed to load worker config: {e}")
     sys.exit(1)
 
-from hive.comb.streamlit_helpers import render_cell
+from hive.comb.streamlit_helpers import render_cell  # noqa: E402
 
 st.set_page_config(
     page_title=f"{config.name} — Hive Dashboard",
