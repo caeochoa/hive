@@ -51,3 +51,34 @@ def test_agent_session():
 def test_worker_entry():
     entry = WorkerEntry(name="budget", path="/home/user/budget")
     assert entry.name == "budget"
+
+
+def test_schedule_entry_usage_limit_defaults():
+    entry = ScheduleEntry(cron="0 8 * * *", agent_prompt="Do thing")
+    assert entry.skip_if_five_hour_above is None
+    assert entry.skip_if_seven_day_above is None
+    assert entry.notify_on_skip is True
+
+
+def test_schedule_entry_usage_limits_set():
+    entry = ScheduleEntry(
+        cron="0 8 * * *",
+        agent_prompt="Do thing",
+        skip_if_five_hour_above=80.0,
+        skip_if_seven_day_above=90.0,
+        notify_on_skip=False,
+    )
+    assert entry.skip_if_five_hour_above == 80.0
+    assert entry.skip_if_seven_day_above == 90.0
+    assert entry.notify_on_skip is False
+
+
+def test_schedule_entry_usage_limits_from_dict():
+    data = {
+        "cron": "0 8 * * *",
+        "agent_prompt": "Do thing",
+        "skip_if_five_hour_above": 75.5,
+    }
+    entry = ScheduleEntry(**data)
+    assert entry.skip_if_five_hour_above == 75.5
+    assert entry.skip_if_seven_day_above is None

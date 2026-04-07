@@ -25,6 +25,9 @@ class ScheduleEntry(BaseModel):
     cron: str
     run: str | None = None
     agent_prompt: str | None = None
+    skip_if_five_hour_above: float | None = None
+    skip_if_seven_day_above: float | None = None
+    notify_on_skip: bool = True
 
     @model_validator(mode="after")
     def check_run_or_agent(self) -> ScheduleEntry:
