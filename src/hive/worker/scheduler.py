@@ -11,8 +11,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from hive.shared.config import WorkerConfig
+from hive.shared.models import ScheduleEntry
 from hive.worker.agent import AgentRunner
 from hive.worker.commands import CommandRegistry
+from hive.worker.usage import UsageStore
 from hive.worker.utils import md_to_telegram_html, send_long_message
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ class WorkerScheduler:
         bot,
         allowed_user_ids: list[int],
         auto_commit: Callable[[str], Awaitable[None]],
+        usage_store: UsageStore | None = None,
     ) -> None:
         self._config = config
         self._registry = registry
@@ -36,6 +39,7 @@ class WorkerScheduler:
         self._bot = bot
         self._allowed_user_ids = allowed_user_ids
         self._auto_commit = auto_commit
+        self._usage_store = usage_store
         self._scheduler = AsyncIOScheduler()
 
     def start(self) -> None:
@@ -62,7 +66,7 @@ class WorkerScheduler:
                 self._scheduler.add_job(
                     self._run_agent_prompt,
                     trigger=trigger,
-                    args=[entry.agent_prompt],
+                    args=[entry],
                     name=f"prompt:{entry.agent_prompt[:40]}",
                 )
 
@@ -90,9 +94,29 @@ class WorkerScheduler:
         finally:
             await self._auto_commit("scheduled command: " + meta.name)
 
-    async def _run_agent_prompt(self, prompt: str) -> None:
+    async def _run_agent_prompt(self, entry: ScheduleEntry) -> None:
         """Execute a scheduled agent prompt for each allowed user and auto-commit."""
+        prompt = entry.agent_prompt or ""
         logger.info("Scheduled agent prompt starting: %r", prompt[:60])
+
+        if self._usage_store and (
+            entry.skip_if_five_hour_above is not None
+            or entry.skip_if_seven_day_above is not None
+        ):
+            ok, reason = self._usage_store.check_limits(
+                entry.skip_if_five_hour_above,
+                entry.skip_if_seven_day_above,
+            )
+            if not ok:
+                logger.warning("[usage] skipping scheduled prompt — %s", reason)
+                if entry.notify_on_skip:
+                    for uid in self._allowed_user_ids:
+                        await self._bot.send_message(
+                            chat_id=uid,
+                            text=f"Scheduled task skipped: {reason}",
+                        )
+                return
+
         try:
             for user_id in self._allowed_user_ids:
                 response = await self._agent.run(

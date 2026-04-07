@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class CommandArg(BaseModel):
@@ -25,6 +25,16 @@ class ScheduleEntry(BaseModel):
     cron: str
     run: str | None = None
     agent_prompt: str | None = None
+    skip_if_five_hour_above: float | None = None
+    skip_if_seven_day_above: float | None = None
+    notify_on_skip: bool = True
+
+    @field_validator("skip_if_five_hour_above", "skip_if_seven_day_above", mode="before")
+    @classmethod
+    def validate_threshold(cls, v: object) -> object:
+        if v is not None and not (0.0 <= float(v) <= 100.0):
+            raise ValueError("threshold must be between 0.0 and 100.0")
+        return v
 
     @model_validator(mode="after")
     def check_run_or_agent(self) -> ScheduleEntry:
