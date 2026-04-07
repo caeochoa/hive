@@ -95,8 +95,11 @@ class WorkerRuntime:
         sessions_file = (
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"
         )
+        from hive.worker.usage import DEFAULT_USAGE_PATH, UsageStore
+        usage_store = UsageStore(DEFAULT_USAGE_PATH, framework_key="claude_agent_sdk")
         self._agent = ClaudeAgentRunner(
-            agent_config, commands_mcp, command_names, sessions_file, self._config.worker_dir
+            agent_config, commands_mcp, command_names, sessions_file, self._config.worker_dir,
+            usage_store=usage_store,
         )
 
         self._agent.set_builtins_mcp(build_builtin_mcp_server(self._agent))
@@ -130,6 +133,7 @@ class WorkerRuntime:
             bot,
             self._config.telegram_allowed_user_ids,
             self._auto_commit,
+            usage_store=usage_store,
         )
         self._scheduler.start()
 

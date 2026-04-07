@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hive.shared.models import AgentSession
+from hive.worker.usage import UsageStore
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +54,14 @@ class ClaudeAgentRunner(AgentRunner):
         command_names: list[str],
         sessions_file: Path,
         worker_dir: Path,
+        usage_store: UsageStore | None = None,
     ) -> None:
         self._config = config
         self._commands_mcp = commands_mcp
         self._command_names = command_names
         self._sessions_file = sessions_file
         self._worker_dir = worker_dir
+        self._usage_store = usage_store
 
         self._sessions: dict[int, dict] = {}
         self._clients: dict[int, Any] = {}
@@ -180,6 +183,34 @@ class ClaudeAgentRunner(AgentRunner):
         self._builtins_mcp = server
 
     # ------------------------------------------------------------------ #
+    # Usage tracking hooks
+    # ------------------------------------------------------------------ #
+
+    def _make_hooks(self) -> dict | None:
+        """Return a hooks dict with a Stop callback if a UsageStore is configured."""
+        if self._usage_store is None:
+            return None
+        from claude_agent_sdk.types import HookMatcher
+        return {"Stop": [HookMatcher(hooks=[self._on_stop_hook])]}
+
+    async def _on_stop_hook(self, input_data: Any, transcript_path: Any, context: Any) -> dict:
+        """Capture rate_limits from the Stop hook and persist to UsageStore."""
+        rate_limits = input_data.get("rate_limits") if isinstance(input_data, dict) else None
+        if rate_limits and self._usage_store is not None:
+            five_hour = rate_limits.get("five_hour") or {}
+            seven_day = rate_limits.get("seven_day") or {}
+            five_pct = five_hour.get("percent_used")
+            seven_pct = seven_day.get("percent_used")
+            if five_pct is not None or seven_pct is not None:
+                self._usage_store.save(five_pct, seven_pct)
+                logger.info(
+                    "[usage] captured five_hour=%s%% seven_day=%s%%",
+                    f"{five_pct:.1f}" if five_pct is not None else "n/a",
+                    f"{seven_pct:.1f}" if seven_pct is not None else "n/a",
+                )
+        return {}
+
+    # ------------------------------------------------------------------ #
     # Client management
     # ------------------------------------------------------------------ #
 
@@ -236,6 +267,9 @@ class ClaudeAgentRunner(AgentRunner):
             }
             if thinking_budget is not None:
                 base_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+            hooks = self._make_hooks()
+            if hooks is not None:
+                base_kwargs["hooks"] = hooks
 
             # Merge session-specific overrides (e.g. model, max_turns).
             overrides = dict(self._session_overrides.get(chat_id, {}))
@@ -275,6 +309,7 @@ class ClaudeAgentRunner(AgentRunner):
         from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
         thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
+        hooks = self._make_hooks()
         options = ClaudeAgentOptions(
             system_prompt=getattr(
                 self._config,
@@ -289,6 +324,7 @@ class ClaudeAgentRunner(AgentRunner):
             max_turns=self._config.max_turns,
             **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
                if thinking_budget is not None else {}),
+            **({"hooks": hooks} if hooks is not None else {}),
         )
 
         logger.info("Agent one-shot query: %r", message[:80])
