@@ -75,6 +75,31 @@ cron = "0 9 * * 1"
 agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 ```
 
+## Usage-aware skipping
+
+`agent_prompt` jobs can be configured to skip automatically when Claude subscription usage is above a threshold. This prevents costly or rate-limited agent runs during high-usage periods.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `skip_if_five_hour_above` | float | _(none)_ | Skip if 5-hour usage % ≥ this value (0–100) |
+| `skip_if_seven_day_above` | float | _(none)_ | Skip if 7-day usage % ≥ this value (0–100) |
+| `notify_on_skip` | bool | `true` | Send a Telegram message when the job is skipped |
+
+Both thresholds are optional and independent. If neither is set, the job always runs. If usage data is missing or stale, the job runs regardless (fail-open).
+
+`notify_on_skip` defaults to `true` — you'll get a Telegram message whenever a job is skipped. Set it to `false` for silent skipping.
+
+```toml
+[[schedule]]
+cron = "0 12 * * *"
+agent_prompt = "Run the midday analysis"
+skip_if_five_hour_above = 80.0
+skip_if_seven_day_above = 90.0
+notify_on_skip = false   # skip silently
+```
+
+Usage data is written to `~/.config/hive/usage.json` after each agent session by the Hive runtime. No additional setup is required.
+
 ## Combining both types
 
 A Worker can have any number of `[[schedule]]` entries mixing both types:
