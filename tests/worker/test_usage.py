@@ -141,12 +141,6 @@ class TestCheckLimitsFiveHour:
 
     def test_stale_five_hour_data_allows(self, store: UsageStore) -> None:
         store.save(95.0, 20.0)
-        stale_time = time.time() - _FIVE_HOUR_STALE - 1
-        with patch("hive.worker.usage.time") as mock_time:
-            mock_time.time.return_value = stale_time + _FIVE_HOUR_STALE + 10
-            # Re-save with a recorded_at that is stale
-            pass
-        # Patch time.time at check point to simulate staleness
         with patch("hive.worker.usage.time") as mock_time:
             mock_time.time.return_value = time.time() + _FIVE_HOUR_STALE + 1
             ok, reason = store.check_limits(five_hour_threshold=80.0, seven_day_threshold=None)

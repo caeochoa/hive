@@ -33,8 +33,11 @@ class UsageStore:
             }
         }
 
-    Writes are POSIX-atomic (write to .tmp then os.replace) so concurrent
-    workers never produce torn reads.
+    Writes are POSIX-atomic (write to .tmp then os.replace) so reads never see
+    a torn file. However, if two workers write simultaneously under the same
+    framework_key, the second writer wins and the first writer's update is lost.
+    In practice this window is tiny and workers rarely send messages at exactly
+    the same time.
 
     Missing or stale data always allows the task to run — we'd rather run than
     silently skip based on outdated info.
