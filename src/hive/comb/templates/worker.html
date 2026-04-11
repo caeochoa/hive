@@ -226,11 +226,13 @@ tr:nth-child(even) td { background: var(--table-stripe); }
     </div>
     <div class="cell-controls">
       <button class="cell-btn" title="Refresh" onclick="refreshCell({{ loop.index0 }})">↺</button>
+      {% if cell.type != "app" %}
       <button class="cell-btn" title="Expand" onclick="expandCell({{ loop.index0 }})">⤢</button>
+      {% endif %}
     </div>
   </div>
   <div class="cell-body" id="body-{{ loop.index0 }}">
-    <span class="cell-loading">Loading…</span>
+    {% if cell.type != "app" %}<span class="cell-loading">Loading…</span>{% endif %}
   </div>
 </div>
 {% endfor %}
@@ -250,11 +252,26 @@ tr:nth-child(even) td { background: var(--table-stripe); }
 <script>
 const WORKER = {{ name | tojson }};
 const CELL_TYPES = {{ cell_types | tojson }};
+const CELL_SLUGS = {{ cell_slugs | tojson }};
 const essSources = {};   // index → EventSource
 const cellData = {};     // index → last fetched data node (for expand)
 const sortState = {};    // index → {col, dir}
 
 // ── Renderers ────────────────────────────────────────────────────────────────
+
+function renderApp(i, container) {
+  const slug = CELL_SLUGS[i];
+  const url = `/workers/${WORKER}/apps/${slug}`;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:1.5rem 0;';
+  const btn = document.createElement('a');
+  btn.href = url;
+  btn.textContent = 'Open';
+  btn.style.cssText = 'display:inline-block;padding:0.5rem 1.5rem;background:var(--accent);color:#fff;border-radius:6px;font-weight:600;font-size:0.875rem;text-decoration:none;';
+  wrap.appendChild(btn);
+  container.replaceChildren(wrap);
+  return wrap;
+}
 
 function renderLog(i, container) {
   const pre = document.createElement('pre');
@@ -442,6 +459,8 @@ function refreshCell(i) {
   if (type === 'log') {
     container.replaceChildren();
     renderLog(i, container);
+  } else if (type === 'app') {
+    renderApp(i, container);
   } else {
     fetchCell(i);
   }
@@ -450,6 +469,7 @@ function refreshCell(i) {
 // ── Modal ────────────────────────────────────────────────────────────────────
 
 function expandCell(i) {
+  if (CELL_TYPES[i] === 'app') return;
   const d = cellData[i];
   const modal = document.getElementById('modal');
   const mbody = document.getElementById('modal-body');
@@ -493,6 +513,8 @@ CELL_TYPES.forEach((type, i) => {
   const container = document.getElementById(`body-${i}`);
   if (type === 'log') {
     renderLog(i, container);
+  } else if (type === 'app') {
+    renderApp(i, container);
   } else {
     fetchCell(i);
     setInterval(() => fetchCell(i), 10000);

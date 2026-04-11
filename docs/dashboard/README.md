@@ -153,6 +153,55 @@ Example JSON file (labeled values):
 ]
 ```
 
+### `app`
+
+Embeds a full-page interactive application in your dashboard. The cell renders as a card with an **Open** button; clicking it navigates to a dedicated URL served by a FastAPI router you define in the Worker folder.
+
+```toml
+{ type = "app", title = "Browse Transactions", source = "dashboard/browse_app.py" }
+```
+
+The `source` path (relative to the Worker folder) must point to a Python file that exports either:
+
+- **`make_router(worker_dir: Path) -> APIRouter`** *(preferred)* — a factory function called once at Comb startup with the Worker folder path as an argument. Use this when your app needs to read Worker files.
+- **`router: APIRouter`** — a bare `APIRouter` instance. In this case, locate the Worker folder yourself (e.g. `Path(__file__).resolve().parent.parent`).
+
+The app is served at `/workers/{name}/apps/{slug}`, where `slug` is derived from the cell title by lowercasing and replacing non-alphanumeric characters with hyphens (`"Browse Transactions"` → `"browse-transactions"`).
+
+Any sub-routes defined on the router (`/api/data`, `/submit`, etc.) are automatically available under that prefix.
+
+**Minimal example** (`dashboard/browse_app.py`):
+
+```python
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+from pathlib import Path
+
+def make_router(worker_dir: Path) -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/")
+    async def index():
+        transactions = (worker_dir / "memory" / "transactions.json").read_text()
+        return HTMLResponse(f"""
+        <html><body>
+          <h1>Transactions</h1>
+          <pre>{transactions}</pre>
+        </body></html>
+        """)
+
+    @router.post("/categorise")
+    async def categorise(data: dict):
+        # update memory/transactions.json ...
+        return {"ok": True}
+
+    return router
+```
+
+The router has access to the full FastAPI ecosystem — `Request`, `Form`, `HTMLResponse`, `JSONResponse`, `Jinja2Templates`, etc. Only packages installed in the Hive environment are available; Worker-specific `.venv` packages are not.
+
+> **Note:** App routers are mounted when the Comb server starts. After adding or changing an `app` cell, run `hive comb restart` for the change to take effect.
+
 ## Directory Source Behavior
 
 For `file` and `markdown` cell types, `source` can point to either a file or a directory. When it points to a directory, Comb selects the most recently modified file in that directory and renders it. The cell subtitle shows the selected filename.
@@ -180,5 +229,6 @@ cells = [
   { type = "status",  title = "Health",        source = "memory/health.json", key = "status" },
   { type = "table",   title = "Recent Tasks",  source = "memory/tasks.json" },
   { type = "chart",   title = "Daily Activity",source = "memory/activity.json" },
+  { type = "app",     title = "Browse Transactions", source = "dashboard/browse_app.py" },
 ]
 ```
