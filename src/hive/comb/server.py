@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import importlib.util
 import logging
 import re
 import socket
@@ -66,12 +67,14 @@ def _title_to_slug(title: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
 
 
-def _load_app_router(source: Path, worker_dir: Path):
-    import importlib.util
-    if not source.is_file():
+def _load_app_router(source: Path, worker_dir: Path, worker_name: str):
+    resolved = source.resolve()
+    if not resolved.is_relative_to(worker_dir.resolve()):
+        raise ValueError(f"source path escapes worker dir: {source}")
+    if not resolved.is_file():
         raise FileNotFoundError(f"App source not found: {source}")
     spec = importlib.util.spec_from_file_location(
-        f"_hive_app_{source.stem}", source
+        f"_hive_app_{worker_name}_{resolved.stem}", resolved
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -93,12 +96,22 @@ def _mount_worker_apps() -> None:
             if cell.type != "app":
                 continue
             slug = _title_to_slug(cell.title)
+            if not slug:
+                logger.warning(
+                    "Skipping app cell with empty slug [worker=%s cell=%r]",
+                    worker_name, cell.title,
+                )
+                continue
             if (worker_name, slug) in _mounted_apps:
+                logger.warning(
+                    "Slug collision: app cell %r in worker %s produces slug %r which is already mounted; skipping",
+                    cell.title, worker_name, slug,
+                )
                 continue
             source = cfg.worker_dir / cell.source
             prefix = f"/workers/{worker_name}/apps/{slug}"
             try:
-                router = _load_app_router(source, cfg.worker_dir)
+                router = _load_app_router(source, cfg.worker_dir, worker_name)
                 app.include_router(router, prefix=prefix)
                 _mounted_apps.add((worker_name, slug))
                 logger.info("Mounted app router %s -> %s", cell.source, prefix)
@@ -172,6 +185,8 @@ async def get_cell(name: str, i: int):
         elif cell.type == "chart":
             content = render_chart_cell(source, cell.key)
         elif cell.type == "app":
+            # Not called by the frontend (which renders app cells directly),
+            # but available for external API consumers.
             slug = _title_to_slug(cell.title)
             content = {"url": f"/workers/{name}/apps/{slug}"}
         else:
