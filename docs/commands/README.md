@@ -53,6 +53,8 @@ When Hive invokes a script as a subprocess, arguments are passed on the command 
 
 A `bool` argument is only appended to the command line when its value is truthy. If false, the flag is omitted entirely.
 
+> **Important:** Scripts must use named `--argname` flags in `argparse` — not positional arguments. Hive always invokes scripts with `--name value` style. Defining a positional argument (`parser.add_argument("period", ...)`) will cause argparse to reject the call with `error: unrecognized arguments: --period`. Always write `parser.add_argument("--period", ...)`.
+
 ## Shebang line handling
 
 If a script's first line starts with `#!`, Hive skips it before parsing the docstring. This means shebangs are allowed and will not break docstring detection:

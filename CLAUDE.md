@@ -72,6 +72,7 @@ args:
 - Hive invokes scripts as: `.venv/bin/python commands/<script>.py [--arg value | --flag]`
 - Scripts may have a shebang line (`#!`) — Hive skips it when parsing docstrings
 - `bool` args are passed as flags (`--name` only, no value); other types as `--name value`
+- **Scripts must use named `--argname` flags in argparse** — positional arguments will fail because Hive always calls scripts as `--name value`
 - Stdout → Telegram reply
 - Non-zero exit → error, stderr surfaced to user
 - `WORKER_DIR` env var set by Hive so scripts can access Worker folder files
