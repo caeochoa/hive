@@ -24,6 +24,10 @@
 - [Spec](reference/SPEC.md) — What Hive is, vocabulary, design philosophy
 - [Architecture](reference/architecture.md) — Implementation details for contributors
 
+## Claude Code Skills
+
+- [Skills](../skills/) — `/create-worker`, `/add-command`, `/setup-dashboard`, `/add-schedule` — Claude Code skills for building and managing Workers
+
 ## Archive
 
 Historical design documents: [archive/](archive/)

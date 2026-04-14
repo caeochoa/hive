@@ -1,0 +1,28 @@
+{
+  "skill_name": "create-worker",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to create a worker that tracks my daily habits. I should be able to log habits, see my streak, and get a morning reminder to fill in yesterday's habits. Call it habit-tracker.",
+      "expected_output": "A Worker with: hive.toml with a tailored system prompt about habit tracking, schedule for morning reminder, commands like log_habit.py and streak.py with proper YAML docstrings and argparse, .env template reminder.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Create a worker in this directory. There's already some Python code here that fetches crypto prices from CoinGecko. I want a bot that can check prices on demand and alert me every morning if anything moved more than 5%.",
+      "expected_output": "A Worker that wraps the existing crypto code into command scripts (e.g., check_price.py), a scheduled morning alert script, system prompt about crypto monitoring, and the existing code referenced/imported rather than rewritten.",
+      "files": [
+        {
+          "path": "crypto.py",
+          "content": "import requests\n\ndef get_price(coin_id: str) -> float:\n    \"\"\"Fetch current USD price from CoinGecko.\"\"\"\n    url = f\"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd\"\n    resp = requests.get(url)\n    resp.raise_for_status()\n    return resp.json()[coin_id][\"usd\"]\n\ndef get_prices(coin_ids: list[str]) -> dict[str, float]:\n    \"\"\"Fetch prices for multiple coins.\"\"\"\n    ids = \",\".join(coin_ids)\n    url = f\"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd\"\n    resp = requests.get(url)\n    resp.raise_for_status()\n    return {k: v[\"usd\"] for k, v in resp.json().items()}\n\nWATCHLIST = [\"bitcoin\", \"ethereum\", \"solana\"]\n\nif __name__ == \"__main__\":\n    for coin, price in get_prices(WATCHLIST).items():\n        print(f\"{coin}: ${price:,.2f}\")\n"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "make me a simple worker called 'notes'. just a basic one where i can send it notes via telegram and it remembers them. maybe a command to search through old notes. nothing fancy.",
+      "expected_output": "A minimal Worker with: simple system prompt about note-taking, a search_notes.py command that searches memory/, no schedules or dashboard (user said nothing fancy). Should not over-scaffold.",
+      "files": []
+    }
+  ]
+}
