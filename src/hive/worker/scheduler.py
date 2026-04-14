@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -97,12 +98,15 @@ class WorkerScheduler:
                     await send_long_message((self._bot, uid), output)
         except CommandError as e:
             logger.error("Scheduled command %s failed: %s", meta.name, e)
-            for uid in self._allowed_user_ids:
-                await self._bot.send_message(
-                    chat_id=uid,
-                    text=f"Scheduled task <b>{meta.name}</b> failed:\n<pre>{e}</pre>",
-                    parse_mode="HTML",
-                )
+            try:
+                for uid in self._allowed_user_ids:
+                    await self._bot.send_message(
+                        chat_id=uid,
+                        text=f"Scheduled task <b>{html.escape(meta.name)}</b> failed:\n<pre>{html.escape(str(e))}</pre>",
+                        parse_mode="HTML",
+                    )
+            except Exception:
+                logger.exception("Failed to send error notification for command %s", meta.name)
         finally:
             await self._auto_commit("scheduled command: " + meta.name)
 
@@ -154,13 +158,13 @@ class WorkerScheduler:
             event.exception,
             exc_info=event.exception,
         )
-        asyncio.get_event_loop().create_task(self._notify_job_error(event))
+        asyncio.get_running_loop().create_task(self._notify_job_error(event))
 
     async def _notify_job_error(self, event: JobExecutionEvent) -> None:
         """Send a Telegram notification for an unexpected job-level failure."""
         for uid in self._allowed_user_ids:
             await self._bot.send_message(
                 chat_id=uid,
-                text=f"Scheduled job <b>{event.job_id}</b> failed:\n<pre>{event.exception}</pre>",
+                text=f"Scheduled job <b>{html.escape(str(event.job_id))}</b> failed:\n<pre>{html.escape(str(event.exception))}</pre>",
                 parse_mode="HTML",
             )
