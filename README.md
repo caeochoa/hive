@@ -267,6 +267,8 @@ If you use [Claude Code](https://claude.ai/code), this repo ships a set of skill
 
 Skills live in the [`skills/`](skills/) directory. Copy any skill folder into your `~/.claude/skills/` directory (or your project's `.claude/skills/`) to make it available in Claude Code.
 
+> **Note on naming:** The folder name must match the skill name — `create-worker/` invokes as `/create-worker`. Project-level `.claude/skills/` takes precedence over `~/.claude/skills/`, so if you already have a `create-worker` skill installed globally, placing this repo's version in your project's `.claude/skills/` will override it for that project only.
+
 ---
 
 ## Development

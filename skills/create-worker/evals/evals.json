@@ -21,7 +21,8 @@
     {
       "id": 3,
       "prompt": "make me a simple worker called 'notes'. just a basic one where i can send it notes via telegram and it remembers them. maybe a command to search through old notes. nothing fancy.",
-      "expected_output": "A minimal Worker with: simple system prompt about note-taking, a search_notes.py command that searches memory/, no schedules or dashboard (user said nothing fancy). Should not over-scaffold."
+      "expected_output": "A minimal Worker with: simple system prompt about note-taking, a search_notes.py command that searches memory/, no schedules or dashboard (user said nothing fancy). Should not over-scaffold.",
+      "files": []
     }
   ]
 }

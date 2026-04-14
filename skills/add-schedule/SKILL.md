@@ -28,6 +28,7 @@ agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 - Output is logged, not sent to Telegram
 - Auto-commits any file changes after completion
 - No LLM cost
+- Scheduled `run` jobs always invoke the script without arguments — if you need parameterised logic, put it in an `agent_prompt` or hardcode values in a wrapper script
 
 **`agent_prompt` jobs:**
 - Route a prompt through the Claude agent
@@ -62,7 +63,7 @@ skip_if_seven_day_above = 5.00   # skip if 7-day spend exceeds $5.00
 notify_on_skip = true            # send Telegram message when skipped (default: true)
 ```
 
-Usage data is tracked in `~/.config/hive/usage.json`. Scheduled jobs are skipped (not cancelled) — they resume at the next scheduled time if spend drops below the threshold.
+Usage data is tracked internally by Hive. Scheduled jobs are skipped (not cancelled) — they resume at the next scheduled time if spend drops below the threshold.
 
 **Important:** Scheduled jobs do NOT trigger config reload or Worker restart. After editing `hive.toml`, apply with:
 

@@ -79,7 +79,7 @@ cells = [
   { type = "status",   title = "...", source = "memory/health.json", key = "status" },
   { type = "table",    title = "...", source = "memory/items.json" },
   { type = "chart",    title = "...", source = "memory/data.json", key = "values" },
-  # { type = "app", title = "...", source = "dashboard/custom.py" }  # full FastAPI router
+  # { type = "app", title = "...", source = "dashboard/custom.py" }  # full FastAPI router — only Hive env packages available, not the Worker's .venv
 ]
 ```
 
