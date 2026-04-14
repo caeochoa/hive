@@ -254,6 +254,21 @@ For full design details see [`docs/reference/SPEC.md`](docs/reference/SPEC.md).
 
 ---
 
+## Claude Code Skills
+
+If you use [Claude Code](https://claude.ai/code), this repo ships a set of skills that help you build and manage Workers without memorising the full API. Skills are invoked with `/skill-name` in the Claude Code prompt.
+
+| Skill | What it does |
+|---|---|
+| `/create-worker` | Scaffold a complete new Worker — interviews you, generates `hive.toml`, command scripts, schedules, and dashboard config |
+| `/add-command` | Add a command script to an existing Worker, with style consistency checks against existing commands |
+| `/setup-dashboard` | Configure Comb cells based on what files your Worker produces; can scaffold `app` cells with a FastAPI router |
+| `/add-schedule` | Add a `[[schedule]]` block with guidance on `run` vs `agent_prompt`, cron syntax, and cost-guard fields |
+
+Skills live in the [`skills/`](skills/) directory. Copy any skill folder into your `~/.claude/skills/` directory (or your project's `.claude/skills/`) to make it available in Claude Code.
+
+---
+
 ## Development
 
 ```bash
