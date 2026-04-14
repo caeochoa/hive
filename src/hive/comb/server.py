@@ -130,7 +130,9 @@ async def _lifespan(application: FastAPI):
 
 
 app = FastAPI(title="Hive Comb", docs_url=None, redoc_url=None, lifespan=_lifespan)
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 @app.get("/", response_class=HTMLResponse)
