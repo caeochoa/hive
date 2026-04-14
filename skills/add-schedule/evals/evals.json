@@ -1,0 +1,28 @@
+{
+  "skill_name": "add-schedule",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a daily morning brief to my worker at 8am. It should summarise what happened yesterday and send it to me on Telegram.",
+      "expected_output": "[[schedule]] block with cron '0 8 * * *', agent_prompt asking the agent to read relevant memory files and summarise yesterday's activity. Includes cost-guard fields (skip_if_five_hour_above, skip_if_seven_day_above) with reasonable defaults. hive restart reminder.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I want my worker to run the fetch_data.py script every hour.",
+      "expected_output": "[[schedule]] block with cron '0 * * * *' and run = 'commands/fetch_data.py'. Notes that output goes to logs, not Telegram. hive restart reminder.",
+      "files": [
+        {
+          "path": "commands/fetch_data.py",
+          "content": "\"\"\"\nname: fetch_data\ndescription: Fetch latest data from the API\n\"\"\"\nimport requests\nimport json\nimport os\nfrom pathlib import Path\n\nworker_dir = Path(os.environ[\"WORKER_DIR\"])\nresp = requests.get(\"https://api.example.com/data\")\ndata = resp.json()\n(worker_dir / \"memory\" / \"data.json\").write_text(json.dumps(data, indent=2))\nprint(f\"Fetched {len(data)} records.\")\n"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Schedule a weekly review every Monday at 9am. The agent should read memory/ and write a weekly_review.md.",
+      "expected_output": "[[schedule]] block with cron '0 9 * * 1', agent_prompt that instructs the agent to read memory/, synthesise the week's activity, and write the result to memory/weekly_review.md. Cost-guard fields included. Explains that the file will be auto-committed after the agent turn.",
+      "files": []
+    }
+  ]
+}
