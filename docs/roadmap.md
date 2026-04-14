@@ -12,10 +12,10 @@ Tracks features, bugs, and backlog items. Format:
 
 ## Bugs
 
-- [ ] **Scheduled tasks notifications**
-  - Currently scheduled tasks notify inconsistently.
-    - "agent_prompt" tasks send a message on the telegram chat, and they seem to be sent to the same session the agent was currently using.
-    - "run" tasks are run silently, without any notifications being sent 
+- [x] **Scheduled tasks notifications**
+  - `run` tasks now send output to Telegram (and error messages on failure). Previously output was discarded.
+  - `agent_prompt` tasks correctly share the user's interactive session — intentional for follow-up continuity.
+  - Job-level scheduler errors are now also sent to Telegram.
 
 ## Features
 
@@ -26,6 +26,7 @@ Tracks features, bugs, and backlog items. Format:
 - [ ] **CLAUDE.md personalization**
 - [ ] **Better table outputs for workers** -- Currently when workers output tables, either through commands or printed by the agent, these often get broken by Telegram's message width, and are pretty ilegible. We should find a better way to handle this.
 - [x] **Interactive comb cells** -- Give workers the possibility to add cells that are more customized and interactive.
+- [ ] **Create worker skill** -- Currently I have a create-worker Claude Code skill that I created for myself. It is a bit outdated and isn't in the repo, but maybe it makes sense to update it and add it to the repo to facillitate creating workers for others.
 - [ ] **Improve agent output** -- Currently all LLM messages are concatenated without spaces and without tool calls. I think this could be improved to make agent responses more intuitive. For example, each LLM message could be a different telegram message, and the tools called could be also different messages, even if the outputs aren't added to keep the chat clean.
 
 ## Backlog
