@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -13,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from hive.shared.config import WorkerConfig
 from hive.shared.models import ScheduleEntry
 from hive.worker.agent import AgentRunner
-from hive.worker.commands import CommandRegistry
+from hive.worker.commands import CommandError, CommandRegistry
 from hive.worker.usage import UsageStore
 from hive.worker.utils import md_to_telegram_html, send_long_message
 
@@ -86,11 +87,22 @@ class WorkerScheduler:
         return None
 
     async def _run_command(self, meta) -> None:
-        """Execute a scheduled command and auto-commit."""
+        """Execute a scheduled command, send output to Telegram, and auto-commit."""
         logger.info("Scheduled command starting: %s", meta.name)
         try:
-            await self._registry.execute(meta, {})
+            output = await self._registry.execute(meta, {})
             logger.info("Scheduled command complete: %s", meta.name)
+            if output.strip():
+                for uid in self._allowed_user_ids:
+                    await send_long_message((self._bot, uid), output)
+        except CommandError as e:
+            logger.error("Scheduled command %s failed: %s", meta.name, e)
+            for uid in self._allowed_user_ids:
+                await self._bot.send_message(
+                    chat_id=uid,
+                    text=f"Scheduled task <b>{meta.name}</b> failed:\n<pre>{e}</pre>",
+                    parse_mode="HTML",
+                )
         finally:
             await self._auto_commit("scheduled command: " + meta.name)
 
@@ -135,10 +147,20 @@ class WorkerScheduler:
             await self._auto_commit("scheduled agent prompt")
 
     def _on_job_error(self, event: JobExecutionEvent) -> None:
-        """Log exceptions from failed jobs."""
+        """Log exceptions from failed jobs and notify users via Telegram."""
         logger.error(
             "Scheduled job %s failed: %s",
             event.job_id,
             event.exception,
             exc_info=event.exception,
         )
+        asyncio.get_event_loop().create_task(self._notify_job_error(event))
+
+    async def _notify_job_error(self, event: JobExecutionEvent) -> None:
+        """Send a Telegram notification for an unexpected job-level failure."""
+        for uid in self._allowed_user_ids:
+            await self._bot.send_message(
+                chat_id=uid,
+                text=f"Scheduled job <b>{event.job_id}</b> failed:\n<pre>{event.exception}</pre>",
+                parse_mode="HTML",
+            )

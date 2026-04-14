@@ -49,7 +49,8 @@ Common patterns:
 Behavior:
 - Hive matches the value against discovered commands by filename (e.g., `commands/morning_brief.py` matches the script whose file is `morning_brief.py`).
 - The script is executed with no arguments. If you need arguments, use `agent_prompt` instead or write the defaults into the script.
-- Output is written to the Worker's log. It is **not** sent to Telegram.
+- Output is sent to each allowed user via Telegram and also written to the Worker's log.
+- If the script exits with a non-zero code, an error message is sent to each allowed user via Telegram.
 - After the script completes, Hive auto-commits any modified files in the Worker folder.
 - If the command is not found in the registry at startup, the schedule entry is skipped with a warning.
 
@@ -68,6 +69,8 @@ Behavior:
 - The agent runs for each allowed user ID configured in `.env`. Each user gets a separate agent invocation and receives the response as a Telegram message.
 - The response is sent to each allowed user via Telegram.
 - After all users have been processed, Hive auto-commits any modified files.
+
+**Session continuity:** Scheduled `agent_prompt` runs share the same per-user session as interactive Telegram messages. This is intentional — after receiving a scheduled response, you can send follow-up messages in Telegram and the agent will have context from the scheduled run. A separate session-per-schedule-entry design was considered but deferred until session management is revisited more broadly.
 
 ```toml
 [[schedule]]
