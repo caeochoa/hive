@@ -26,6 +26,7 @@ Tracks features, bugs, and backlog items. Format:
 - [ ] **CLAUDE.md personalization**
 - [ ] **Better table outputs for workers** -- Currently when workers output tables, either through commands or printed by the agent, these often get broken by Telegram's message width, and are pretty ilegible. We should find a better way to handle this.
 - [x] **Interactive comb cells** -- Give workers the possibility to add cells that are more customized and interactive.
+- [x] **Create worker skill** -- Updated and added to the repo under `skills/`. Includes `/create-worker`, `/add-command`, `/setup-dashboard`, and `/add-schedule`.
 - [ ] **Improve agent output** -- Currently all LLM messages are concatenated without spaces and without tool calls. I think this could be improved to make agent responses more intuitive. For example, each LLM message could be a different telegram message, and the tools called could be also different messages, even if the outputs aren't added to keep the chat clean.
 
 ## Backlog
