@@ -12,10 +12,10 @@ Tracks features, bugs, and backlog items. Format:
 
 ## Bugs
 
-- [ ] **Scheduled tasks notifications**
-  - Currently scheduled tasks notify inconsistently.
-    - "agent_prompt" tasks send a message on the telegram chat, and they seem to be sent to the same session the agent was currently using.
-    - "run" tasks are run silently, without any notifications being sent 
+- [x] **Scheduled tasks notifications**
+  - `run` tasks now send output to Telegram (and error messages on failure). Previously output was discarded.
+  - `agent_prompt` tasks correctly share the user's interactive session — intentional for follow-up continuity.
+  - Job-level scheduler errors are now also sent to Telegram.
 
 ## Features
 

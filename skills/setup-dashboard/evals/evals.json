@@ -1,0 +1,23 @@
+{
+  "skill_name": "setup-dashboard",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Set up a dashboard for my budget worker. It has logs/out.log, memory/expenses.json (array of {date, amount, category}), memory/stats.json ({total_month: 312.50, budget: 500}), and memory/summary.md.",
+      "expected_output": "hive.toml [comb] section with: log cell for logs/out.log, markdown cell for memory/summary.md, metric cells for total_month and budget from stats.json, table cell for expenses.json. Sensible titles. hive comb restart reminder.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I want a dashboard for my habit tracker. memory/health.json has {status: 'ok'}, memory/streaks.json has {meditation: 14, exercise: 3}, and I want to be able to browse and filter my habit log interactively.",
+      "expected_output": "hive.toml [comb] section with: status cell for health.json, metric cells for each streak key, an app cell for the interactive log browser. Scaffolds dashboard/habit_browser.py with make_router() that reads memory/, renders an HTML page with the habit data. Notes that only Hive env packages are available.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Just add a basic dashboard for my worker — it only has a log file and a summary.md in memory.",
+      "expected_output": "Minimal [comb] section with just two cells: log cell for logs/out.log and markdown cell for memory/summary.md. No over-engineering.",
+      "files": []
+    }
+  ]
+}

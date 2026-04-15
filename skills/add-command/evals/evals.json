@@ -1,0 +1,28 @@
+{
+  "skill_name": "add-command",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a command to my budget worker that shows a spending summary for the current month. The worker already has an expenses.json in memory/ with an array of {date, amount, category} objects.",
+      "expected_output": "A summary.py command script with YAML docstring (name: summary, no required args), argparse setup, reads memory/expenses.json via WORKER_DIR, filters to current month, prints a formatted breakdown by category with total. Test invocation shown.",
+      "files": [
+        {
+          "path": "memory/expenses.json",
+          "content": "[{\"date\": \"2026-04-01\", \"amount\": 42.50, \"category\": \"food\"}, {\"date\": \"2026-04-03\", \"amount\": 12.00, \"category\": \"transport\"}]"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I want a /search command for my notes worker. It should take a query string and search through all .md files in memory/ for matching lines.",
+      "expected_output": "A search.py command with YAML docstring (name: search, args: query str required), argparse with --query, globs memory/*.md via WORKER_DIR, searches for query (case-insensitive) and prints matching lines with filename context. sys.exit(1) if no query given.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Add a command called 'status' that shows whether my worker's health.json says ok or not. It should just print a one-liner.",
+      "expected_output": "A minimal status.py with YAML docstring (no args), reads memory/health.json, prints the status value in a clear one-liner. Handles missing file gracefully with sys.exit(1) and stderr message.",
+      "files": []
+    }
+  ]
+}
