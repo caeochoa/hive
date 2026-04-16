@@ -36,9 +36,9 @@ The core idea is **one folder = one world**. A Worker folder contains everything
 ## Installation
 
 ```bash
-git clone <repo>
+git clone https://github.com/caeochoa/hive.git
 cd hive
-uv install tool .
+uv tool install .
 ```
 
 The `hive` CLI is now available via `hive`.
