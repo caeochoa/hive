@@ -1,3 +1,5 @@
+<img src="src/hive/comb/static/favicon.svg" width="150" />
+
 # Hive
 
 **Local-first framework for purpose-built Telegram bots**
