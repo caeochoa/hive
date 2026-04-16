@@ -1,6 +1,6 @@
 [project]
 name = "hive"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Local-first Telegram bot framework"
 readme = "README.md"
 authors = [
