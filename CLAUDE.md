@@ -24,7 +24,7 @@ This project uses `uv` for package management (Python 3.12).
 
 ```bash
 uv sync              # install dependencies
-uv run hive          # run the CLI
+uv run hive          # run the CLI (without installing)
 uv add <package>     # add a dependency
 ```
 

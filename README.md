@@ -275,7 +275,7 @@ Skills live in the [`skills/`](skills/) directory. Copy any skill folder into yo
 
 ```bash
 uv sync              # install dependencies
-uv run hive          # run the CLI
+uv run hive          # run the CLI (without installing)
 uv run pytest        # run tests
 uv add <package>     # add a dependency
 ```
