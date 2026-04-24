@@ -71,9 +71,9 @@ Repeatable. Each entry defines one scheduled task.
 | `cron` | string | Yes | 5-field cron expression (`minute hour day month weekday`) |
 | `run` | string | Mutually exclusive with `agent_prompt` | Path to a command script to execute |
 | `agent_prompt` | string | Mutually exclusive with `run` | Prompt to run through the agent on a schedule |
-| `skip_if_five_hour_above` | float | No | Skip this job if Claude 5-hour usage is at or above this percentage (0–100). Missing or stale data is treated as allow. |
-| `skip_if_seven_day_above` | float | No | Skip this job if Claude 7-day usage is at or above this percentage (0–100). Missing or stale data is treated as allow. |
-| `notify_on_skip` | bool | No (default `true`) | Send a Telegram message when the job is skipped due to usage thresholds. Set to `false` for silent skipping. |
+| `skip_if_five_hour_above` | float | No | _(no-op, not yet functional)_ Intended to skip if Claude 5-hour usage ≥ this percentage (0–100). |
+| `skip_if_seven_day_above` | float | No | _(no-op, not yet functional)_ Intended to skip if Claude 7-day usage ≥ this percentage (0–100). |
+| `notify_on_skip` | bool | No (default `true`) | _(no-op, not yet functional)_ Intended to send a Telegram message when the job is skipped due to usage thresholds. |
 
 Exactly one of `run` or `agent_prompt` must be set.
 
@@ -88,13 +88,6 @@ run = "commands/morning_brief.py"
 cron = "0 9 * * 1"
 agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 
-# Skip the job if usage is high; notify via Telegram when skipped
-[[schedule]]
-cron = "0 12 * * *"
-agent_prompt = "Run the midday analysis"
-skip_if_five_hour_above = 80.0
-skip_if_seven_day_above = 90.0
-notify_on_skip = true   # default; set false for silent skipping
 ```
 
 ---

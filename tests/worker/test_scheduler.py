@@ -11,7 +11,6 @@ from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandMeta, ScheduleEntry
 from hive.worker.commands import CommandRegistry
 from hive.worker.scheduler import WorkerScheduler
-from hive.worker.usage import UsageStore
 
 
 # ---------------------------------------------------------------------------
@@ -183,33 +182,46 @@ class TestRunAgentPrompt:
         )
         auto_commit.assert_awaited_once()
 
-    async def test_no_usage_store_always_runs(
+    async def test_skip_if_thresholds_are_no_ops(
         self,
         scheduler: WorkerScheduler,
         agent: AsyncMock,
+        caplog,
     ) -> None:
-        """Scheduler without a UsageStore always runs the task."""
-        assert scheduler._usage_store is None
+        """skip_if thresholds are recognised config but currently no-ops; task always runs."""
+        import logging
         entry = ScheduleEntry(
             cron="0 9 * * 1",
             agent_prompt="Do the thing",
-            skip_if_five_hour_above=10.0,
+            skip_if_five_hour_above=80.0,
+            skip_if_seven_day_above=90.0,
         )
         await scheduler._run_agent_prompt(entry)
         agent.run.assert_awaited_once()
 
-    async def test_skips_and_notifies_when_limit_exceeded(
+    async def test_start_warns_when_thresholds_configured(
         self,
         config: WorkerConfig,
         registry: CommandRegistry,
         agent: AsyncMock,
         bot: AsyncMock,
         auto_commit: AsyncMock,
-        tmp_path: Path,
+        caplog,
     ) -> None:
-        usage_store = MagicMock(spec=UsageStore)
-        usage_store.check_limits.return_value = (False, "5-hour usage 85.0% >= threshold 80.0%")
-
+        """A WARNING is emitted at start() for any entry with skip_if thresholds set."""
+        import logging
+        config = WorkerConfig(
+            **{
+                **config.model_dump(),
+                "schedule": [
+                    ScheduleEntry(
+                        cron="0 9 * * 1",
+                        agent_prompt="Do the thing",
+                        skip_if_seven_day_above=75.0,
+                    )
+                ],
+            }
+        )
         sched = WorkerScheduler(
             config=config,
             registry=registry,
@@ -217,103 +229,8 @@ class TestRunAgentPrompt:
             bot=bot,
             allowed_user_ids=[12345],
             auto_commit=auto_commit,
-            usage_store=usage_store,
         )
-        entry = ScheduleEntry(
-            cron="0 9 * * 1",
-            agent_prompt="Do the thing",
-            skip_if_five_hour_above=80.0,
-            notify_on_skip=True,
-        )
-        await sched._run_agent_prompt(entry)
-
-        agent.run.assert_not_awaited()
-        bot.send_message.assert_awaited_once_with(
-            chat_id=12345,
-            text="Scheduled task skipped: 5-hour usage 85.0% >= threshold 80.0%",
-        )
-
-    async def test_skips_silently_when_notify_off(
-        self,
-        config: WorkerConfig,
-        registry: CommandRegistry,
-        agent: AsyncMock,
-        bot: AsyncMock,
-        auto_commit: AsyncMock,
-    ) -> None:
-        usage_store = MagicMock(spec=UsageStore)
-        usage_store.check_limits.return_value = (False, "7-day usage 92.0% >= threshold 90.0%")
-
-        sched = WorkerScheduler(
-            config=config,
-            registry=registry,
-            agent=agent,
-            bot=bot,
-            allowed_user_ids=[12345],
-            auto_commit=auto_commit,
-            usage_store=usage_store,
-        )
-        entry = ScheduleEntry(
-            cron="0 9 * * 1",
-            agent_prompt="Do the thing",
-            skip_if_seven_day_above=90.0,
-            notify_on_skip=False,
-        )
-        await sched._run_agent_prompt(entry)
-
-        agent.run.assert_not_awaited()
-        bot.send_message.assert_not_awaited()
-
-    async def test_runs_when_within_limits(
-        self,
-        config: WorkerConfig,
-        registry: CommandRegistry,
-        agent: AsyncMock,
-        bot: AsyncMock,
-        auto_commit: AsyncMock,
-    ) -> None:
-        usage_store = MagicMock(spec=UsageStore)
-        usage_store.check_limits.return_value = (True, None)
-
-        sched = WorkerScheduler(
-            config=config,
-            registry=registry,
-            agent=agent,
-            bot=bot,
-            allowed_user_ids=[12345],
-            auto_commit=auto_commit,
-            usage_store=usage_store,
-        )
-        entry = ScheduleEntry(
-            cron="0 9 * * 1",
-            agent_prompt="Do the thing",
-            skip_if_five_hour_above=80.0,
-        )
-        await sched._run_agent_prompt(entry)
-        agent.run.assert_awaited_once()
-
-    async def test_no_thresholds_skips_check(
-        self,
-        config: WorkerConfig,
-        registry: CommandRegistry,
-        agent: AsyncMock,
-        bot: AsyncMock,
-        auto_commit: AsyncMock,
-    ) -> None:
-        """UsageStore.check_limits is not called when no thresholds are configured."""
-        usage_store = MagicMock(spec=UsageStore)
-
-        sched = WorkerScheduler(
-            config=config,
-            registry=registry,
-            agent=agent,
-            bot=bot,
-            allowed_user_ids=[12345],
-            auto_commit=auto_commit,
-            usage_store=usage_store,
-        )
-        entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
-        await sched._run_agent_prompt(entry)
-
-        usage_store.check_limits.assert_not_called()
-        agent.run.assert_awaited_once()
+        with caplog.at_level(logging.WARNING, logger="hive.worker.scheduler"):
+            sched.start()
+        assert "not yet functional" in caplog.text
+        sched.stop()
