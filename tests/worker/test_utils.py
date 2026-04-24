@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from telegram.error import BadRequest
 
 from hive.worker.utils import send_long_message, md_to_telegram_html
 
@@ -159,3 +162,41 @@ class TestMdToTelegramHtml:
         assert "<b>Title</b>" in result
         assert "<code>code</code>" in result
         assert "<pre>x = 1\n</pre>" in result
+
+    def test_crossed_span_nesting_regression(self) -> None:
+        # Original bug: sequential regex passes could produce <b>...<i>...</b>...</i>
+        # AST parser guarantees correct nesting by construction.
+        result = md_to_telegram_html("**bold and _italic** end_")
+        # Should not contain crossed tags — bold closes before italic opens
+        assert "</b>" not in result or result.index("</b>") > result.index("<b>")
+
+    def test_link_no_title_attribute(self) -> None:
+        result = md_to_telegram_html('[text](https://example.com "hover")')
+        assert 'title=' not in result
+        assert result == '<a href="https://example.com">text</a>'
+
+    def test_link_without_title(self) -> None:
+        assert md_to_telegram_html("[click](https://example.com)") == '<a href="https://example.com">click</a>'
+
+
+class TestBadRequestFallback:
+    async def test_fallback_strips_html_and_retries(self) -> None:
+        target = AsyncMock()
+        target.reply_text = AsyncMock(
+            side_effect=[BadRequest("Can't parse entities: ..."), None]
+        )
+
+        await send_long_message(target, "<b>hello &amp; world</b>", parse_mode="HTML")
+
+        assert target.reply_text.await_count == 2
+        plain_call = target.reply_text.await_args_list[1]
+        plain_text = plain_call[0][0]
+        assert plain_text == "hello & world"
+        assert "parse_mode" not in plain_call[1]
+
+    async def test_non_parse_entity_bad_request_reraises(self) -> None:
+        target = AsyncMock()
+        target.reply_text = AsyncMock(side_effect=BadRequest("Message is too long"))
+
+        with pytest.raises(BadRequest, match="Message is too long"):
+            await send_long_message(target, "some text", parse_mode="HTML")

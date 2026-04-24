@@ -25,13 +25,16 @@ class _TelegramHTMLRenderer(mistune.HTMLRenderer):
         return f"<s>{text}</s>"
 
     def paragraph(self, text: str) -> str:
-        return text + "\n"
+        return text.rstrip() + "\n\n"
 
     def heading(self, text: str, level: int, **attrs) -> str:
         return f"<b>{text}</b>\n"
 
+    def link(self, text: str, url: str, title: str | None = None) -> str:
+        return f'<a href="{url}">{text or url}</a>'
+
     def list(self, text: str, ordered: bool, **attrs) -> str:
-        return text
+        return text + "\n"
 
     def list_item(self, text: str) -> str:
         return f"• {text.strip()}\n"
@@ -114,7 +117,7 @@ async def send_long_message(target, text: str, **kwargs) -> None:
                 await bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
         except BadRequest as e:
             if "parse entities" in str(e).lower() and kwargs.get("parse_mode") == "HTML":
-                plain = re.sub(r"<[^>]+>", "", chunk)
+                plain = html.unescape(re.sub(r"<[^>]+>", "", chunk))
                 plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
                 if hasattr(target, "reply_text"):
                     await target.reply_text(plain, **plain_kwargs)
