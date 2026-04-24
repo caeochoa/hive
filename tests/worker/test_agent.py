@@ -764,3 +764,86 @@ async def test_contextvar_set_during_run_interactive(runner, worker_dir):
     assert captured_chat_id == [77]
     # ContextVar reset after the turn
     assert _current_chat_id.get() is None
+
+
+# ------------------------------------------------------------------ #
+# _try_capture_result_usage
+# ------------------------------------------------------------------ #
+
+
+class TestTryCaptureResultUsage:
+    """Unit tests for ClaudeAgentRunner._try_capture_result_usage."""
+
+    @pytest.fixture()
+    def store(self, tmp_path: Path):
+        from hive.worker.usage import UsageStore
+        return UsageStore(path=tmp_path / "usage.json")
+
+    @pytest.fixture()
+    def runner_with_store(self, agent_config, commands_mcp, sessions_file, worker_dir, store):
+        r = ClaudeAgentRunner(
+            config=agent_config,
+            commands_mcp=commands_mcp,
+            command_names=[],
+            sessions_file=sessions_file,
+            worker_dir=worker_dir,
+            usage_store=store,
+        )
+        return r, store
+
+    def test_no_usage_store_is_noop(self, runner):
+        """When usage_store is None, calling the method doesn't raise."""
+        runner._try_capture_result_usage({"rate_limits": {"five_hour": {"percent_used": 50.0}}})
+
+    def test_none_usage_logs_warning(self, runner_with_store, caplog):
+        r, store = runner_with_store
+        with caplog.at_level(logging.WARNING, logger="hive.worker.agent"):
+            r._try_capture_result_usage(None)
+        assert store.load() is None
+        assert "empty" in caplog.text
+
+    def test_empty_dict_logs_warning(self, runner_with_store, caplog):
+        r, store = runner_with_store
+        with caplog.at_level(logging.WARNING, logger="hive.worker.agent"):
+            r._try_capture_result_usage({})
+        assert store.load() is None
+
+    def test_nested_rate_limits_structure(self, runner_with_store):
+        r, store = runner_with_store
+        usage = {
+            "input_tokens": 100,
+            "rate_limits": {
+                "five_hour": {"percent_used": 60.5},
+                "seven_day": {"percent_used": 82.0},
+            },
+        }
+        r._try_capture_result_usage(usage)
+        data = store.load()
+        assert data is not None
+        assert data["five_hour_pct"] == pytest.approx(60.5)
+        assert data["seven_day_pct"] == pytest.approx(82.0)
+
+    def test_flat_keys_structure(self, runner_with_store):
+        r, store = runner_with_store
+        usage = {"five_hour_pct": 55.0, "seven_day_pct": 78.0, "input_tokens": 200}
+        r._try_capture_result_usage(usage)
+        data = store.load()
+        assert data is not None
+        assert data["five_hour_pct"] == pytest.approx(55.0)
+        assert data["seven_day_pct"] == pytest.approx(78.0)
+
+    def test_unknown_structure_logs_warning(self, runner_with_store, caplog):
+        r, store = runner_with_store
+        with caplog.at_level(logging.WARNING, logger="hive.worker.agent"):
+            r._try_capture_result_usage({"input_tokens": 100, "output_tokens": 50})
+        assert store.load() is None
+        assert "no rate-limit percentages" in caplog.text
+
+    def test_partial_nested_only_five_hour(self, runner_with_store):
+        r, store = runner_with_store
+        usage = {"rate_limits": {"five_hour": {"percent_used": 70.0}}}
+        r._try_capture_result_usage(usage)
+        data = store.load()
+        assert data is not None
+        assert data["five_hour_pct"] == pytest.approx(70.0)
+        assert data["seven_day_pct"] is None
