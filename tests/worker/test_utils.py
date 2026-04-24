@@ -166,9 +166,9 @@ class TestMdToTelegramHtml:
     def test_crossed_span_nesting_regression(self) -> None:
         # Original bug: sequential regex passes could produce <b>...<i>...</b>...</i>
         # AST parser guarantees correct nesting by construction.
-        result = md_to_telegram_html("**bold and _italic** end_")
-        # Should not contain crossed tags — bold closes before italic opens
-        assert "</b>" not in result or result.index("</b>") > result.index("<b>")
+        result = md_to_telegram_html("**bold _italic_**")
+        # Exact expected output: bold wraps italic, not crossed tags
+        assert result == "<b>bold <i>italic</i></b>"
 
     def test_link_no_title_attribute(self) -> None:
         result = md_to_telegram_html('[text](https://example.com "hover")')
@@ -177,6 +177,10 @@ class TestMdToTelegramHtml:
 
     def test_link_without_title(self) -> None:
         assert md_to_telegram_html("[click](https://example.com)") == '<a href="https://example.com">click</a>'
+
+    def test_link_url_ampersand_escaped(self) -> None:
+        result = md_to_telegram_html("[click](https://example.com?a=1&b=2)")
+        assert result == '<a href="https://example.com?a=1&amp;b=2">click</a>'
 
 
 class TestBadRequestFallback:

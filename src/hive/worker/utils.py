@@ -31,7 +31,7 @@ class _TelegramHTMLRenderer(mistune.HTMLRenderer):
         return f"<b>{text}</b>\n"
 
     def link(self, text: str, url: str, title: str | None = None) -> str:
-        return f'<a href="{url}">{text or url}</a>'
+        return f'<a href="{url.replace("&", "&amp;")}">{text or url}</a>'
 
     def list(self, text: str, ordered: bool, **attrs) -> str:
         return text + "\n"
