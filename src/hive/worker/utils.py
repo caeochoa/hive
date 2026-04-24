@@ -7,6 +7,59 @@ import html
 import re
 from contextlib import asynccontextmanager, suppress
 
+import mistune
+from mistune.plugins.formatting import strikethrough as _strikethrough_plugin
+from telegram.error import BadRequest
+
+
+class _TelegramHTMLRenderer(mistune.HTMLRenderer):
+    """Renders markdown to Telegram-compatible HTML (restricted tag subset)."""
+
+    def strong(self, text: str) -> str:
+        return f"<b>{text}</b>"
+
+    def emphasis(self, text: str) -> str:
+        return f"<i>{text}</i>"
+
+    def strikethrough(self, text: str) -> str:
+        return f"<s>{text}</s>"
+
+    def paragraph(self, text: str) -> str:
+        return text + "\n"
+
+    def heading(self, text: str, level: int, **attrs) -> str:
+        return f"<b>{text}</b>\n"
+
+    def list(self, text: str, ordered: bool, **attrs) -> str:
+        return text
+
+    def list_item(self, text: str) -> str:
+        return f"• {text.strip()}\n"
+
+    def block_code(self, code: str, info: str | None = None) -> str:
+        return f"<pre>{html.escape(code, quote=False)}</pre>\n"
+
+    def block_quote(self, text: str) -> str:
+        return f"<blockquote>{text.strip()}</blockquote>\n"
+
+    def thematic_break(self) -> str:
+        return "───────────\n"
+
+    def linebreak(self) -> str:
+        return "\n"
+
+    def softbreak(self) -> str:
+        return "\n"
+
+    def image(self, text: str, url: str, title: str | None = None) -> str:
+        return text or url
+
+
+_md_parser = mistune.create_markdown(
+    renderer=_TelegramHTMLRenderer(escape=True),
+    plugins=[_strikethrough_plugin],
+)
+
 
 @asynccontextmanager
 async def typing_action(bot, chat_id: int):
@@ -27,67 +80,8 @@ async def typing_action(bot, chat_id: int):
 
 
 def md_to_telegram_html(text: str) -> str:
-    """Convert standard markdown to Telegram-compatible HTML.
-
-    Handles fenced code blocks, inline code, bold, italic, strikethrough,
-    links, and headers. Code block contents are HTML-escaped but not
-    processed for markdown patterns.
-    """
-    parts: list[str] = []
-    last_end = 0
-
-    # Process fenced code blocks first so their contents skip inline conversion
-    fence_re = re.compile(r"```(?:\w+)?\n?(.*?)```", re.DOTALL)
-    for match in fence_re.finditer(text):
-        before = text[last_end : match.start()]
-        parts.append(_md_convert_inline(before))
-        code_content = html.escape(match.group(1), quote=False)
-        parts.append(f"<pre>{code_content}</pre>")
-        last_end = match.end()
-
-    parts.append(_md_convert_inline(text[last_end:]))
-    return "".join(parts)
-
-
-def _md_convert_inline(text: str) -> str:
-    """Convert inline markdown patterns to Telegram HTML in a non-code segment."""
-    # Escape HTML special chars (&, <, >) — quote=False to leave ' and " unescaped
-    text = html.escape(text, quote=False)
-
-    # Extract inline code spans into placeholders so their content isn't further processed
-    placeholders: dict[str, str] = {}
-    counter = [0]
-
-    def store_code(m: re.Match) -> str:
-        key = f"\x00{counter[0]}\x00"
-        counter[0] += 1
-        placeholders[key] = f"<code>{m.group(1)}</code>"
-        return key
-
-    text = re.sub(r"`([^`\n]+)`", store_code, text)
-
-    # Bold: **text** then __text__
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-
-    # Italic: *text* then _text_ (after bold to avoid matching ** as two *)
-    text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
-    text = re.sub(r"_(.+?)_", r"<i>\1</i>", text)
-
-    # Strikethrough: ~~text~~
-    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
-
-    # Links: [text](url)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
-
-    # Headers: # Heading → <b>Heading</b>
-    text = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-
-    # Restore inline code placeholders
-    for key, value in placeholders.items():
-        text = text.replace(key, value)
-
-    return text
+    """Convert markdown to Telegram-compatible HTML using an AST parser."""
+    return (_md_parser(text) or "").strip()
 
 
 def _balance_pre_tags(chunk: str, remainder: str) -> tuple[str, str]:
@@ -112,9 +106,20 @@ async def send_long_message(target, text: str, **kwargs) -> None:
             chunk, text = text[:split_at], text[split_at:].lstrip("\n")
             if kwargs.get("parse_mode") == "HTML":
                 chunk, text = _balance_pre_tags(chunk, text)
-        if hasattr(target, "reply_text"):
-            await target.reply_text(chunk, **kwargs)
-        else:
-            # target is (bot, chat_id) tuple
-            bot, chat_id = target
-            await bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+        try:
+            if hasattr(target, "reply_text"):
+                await target.reply_text(chunk, **kwargs)
+            else:
+                bot, chat_id = target
+                await bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+        except BadRequest as e:
+            if "parse entities" in str(e).lower() and kwargs.get("parse_mode") == "HTML":
+                plain = re.sub(r"<[^>]+>", "", chunk)
+                plain_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+                if hasattr(target, "reply_text"):
+                    await target.reply_text(plain, **plain_kwargs)
+                else:
+                    bot, chat_id = target
+                    await bot.send_message(chat_id=chat_id, text=plain, **plain_kwargs)
+            else:
+                raise
