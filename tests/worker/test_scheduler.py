@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -189,15 +190,16 @@ class TestRunAgentPrompt:
         caplog,
     ) -> None:
         """skip_if thresholds are recognised config but currently no-ops; task always runs."""
-        import logging
         entry = ScheduleEntry(
             cron="0 9 * * 1",
             agent_prompt="Do the thing",
             skip_if_five_hour_above=80.0,
             skip_if_seven_day_above=90.0,
         )
-        await scheduler._run_agent_prompt(entry)
+        with caplog.at_level(logging.WARNING, logger="hive.worker.scheduler"):
+            await scheduler._run_agent_prompt(entry)
         agent.run.assert_awaited_once()
+        assert "not yet functional" not in caplog.text
 
     async def test_start_warns_when_thresholds_configured(
         self,
@@ -209,7 +211,6 @@ class TestRunAgentPrompt:
         caplog,
     ) -> None:
         """A WARNING is emitted at start() for any entry with skip_if thresholds set."""
-        import logging
         config = WorkerConfig(
             **{
                 **config.model_dump(),
