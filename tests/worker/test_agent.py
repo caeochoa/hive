@@ -764,3 +764,114 @@ async def test_contextvar_set_during_run_interactive(runner, worker_dir):
     assert captured_chat_id == [77]
     # ContextVar reset after the turn
     assert _current_chat_id.get() is None
+
+
+# ------------------------------------------------------------------ #
+# Format helpers
+# ------------------------------------------------------------------ #
+
+
+def test_format_tool_use_none_returns_none():
+    from hive.worker.agent import _format_tool_use
+    assert _format_tool_use("Bash", {"command": "ls"}, "none") is None
+
+
+def test_format_tool_use_minimal():
+    from hive.worker.agent import _format_tool_use
+    result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "minimal")
+    assert result == "🔧 Bash"
+
+
+def test_format_tool_use_moderate():
+    from hive.worker.agent import _format_tool_use
+    result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "moderate")
+    assert result == "🔧 Bash: ls -la /tmp"
+
+
+def test_format_tool_use_detailed_same_as_moderate():
+    from hive.worker.agent import _format_tool_use
+    result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "detailed")
+    assert result == "🔧 Bash: ls -la /tmp"
+
+
+def test_format_tool_use_verbose_shows_input_label():
+    from hive.worker.agent import _format_tool_use
+    result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "verbose")
+    assert result is not None
+    assert "🔧 Bash" in result
+    assert "Input:" in result
+    assert "ls -la /tmp" in result
+
+
+def test_format_tool_use_truncates_long_input():
+    from hive.worker.agent import _format_tool_use
+    long_cmd = "x" * 100
+    result = _format_tool_use("Bash", {"command": long_cmd}, "moderate")
+    assert result is not None
+    assert len(result) < 120  # truncated
+
+
+def test_format_tool_result_none_for_minimal():
+    from hive.worker.agent import _format_tool_result
+    assert _format_tool_result("output", False, "minimal") is None
+
+
+def test_format_tool_result_none_for_moderate():
+    from hive.worker.agent import _format_tool_result
+    assert _format_tool_result("output", False, "moderate") is None
+
+
+def test_format_tool_result_detailed_success_multiline():
+    from hive.worker.agent import _format_tool_result
+    content = "line1\nline2\nline3"
+    result = _format_tool_result(content, False, "detailed")
+    assert result is not None
+    assert "✓" in result
+    assert "3" in result  # 3 lines
+
+
+def test_format_tool_result_detailed_error():
+    from hive.worker.agent import _format_tool_result
+    result = _format_tool_result("command not found", True, "detailed")
+    assert result is not None
+    assert "✗" in result
+    assert "command not found" in result
+
+
+def test_format_tool_result_verbose_success():
+    from hive.worker.agent import _format_tool_result
+    content = "hello world"
+    result = _format_tool_result(content, False, "verbose")
+    assert result is not None
+    assert "Output:" in result
+    assert "hello world" in result
+
+
+def test_format_tool_result_verbose_truncates_at_500():
+    from hive.worker.agent import _format_tool_result
+    content = "x" * 600
+    result = _format_tool_result(content, False, "verbose")
+    assert result is not None
+    assert "truncated" in result
+
+
+def test_format_tool_result_verbose_error():
+    from hive.worker.agent import _format_tool_result
+    result = _format_tool_result("boom", True, "verbose")
+    assert result is not None
+    assert "✗" in result
+    assert "boom" in result
+
+
+def test_format_thinking_hidden_when_disabled():
+    from hive.worker.agent import _format_thinking
+    assert _format_thinking("some thoughts", False) is None
+
+
+def test_format_thinking_spoiler_when_enabled():
+    from hive.worker.agent import _format_thinking
+    result = _format_thinking("some thoughts", True)
+    assert result is not None
+    assert "<tg-spoiler>" in result
+    assert "💭" in result
+    assert "some thoughts" in result

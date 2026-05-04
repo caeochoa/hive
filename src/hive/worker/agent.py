@@ -31,6 +31,67 @@ DEFAULT_SYSTEM_PROMPT = (
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
 
 
+def _summarize_input(input_dict: dict) -> str:
+    """Return first value of input dict, single-line, truncated to 60 chars."""
+    if not input_dict:
+        return ""
+    first_val = str(next(iter(input_dict.values())))
+    return first_val.replace("\n", " ")[:60]
+
+
+def _format_tool_use(name: str, input_dict: dict, verbosity: str) -> str | None:
+    """Format a tool-use notification string. Returns None when verbosity is 'none'."""
+    if verbosity == "none":
+        return None
+    if verbosity == "minimal":
+        return f"🔧 {name}"
+    if verbosity in ("moderate", "detailed"):
+        return f"🔧 {name}: {_summarize_input(input_dict)}"
+    if verbosity == "verbose":
+        return f"🔧 {name}\nInput: {_summarize_input(input_dict)}"
+    return None
+
+
+def _format_tool_result(content: Any, is_error: bool, verbosity: str) -> str | None:
+    """Format a tool-result notification string. Returns None for minimal/moderate."""
+    if verbosity not in ("detailed", "verbose"):
+        return None
+
+    if isinstance(content, str):
+        content_str = content
+    elif isinstance(content, list):
+        content_str = "\n".join(
+            c.get("text", str(c)) if isinstance(c, dict) else str(c)
+            for c in content
+        )
+    else:
+        content_str = str(content) if content else ""
+
+    if verbosity == "detailed":
+        if is_error:
+            return f"✗ {content_str[:120]}"
+        lines = content_str.count("\n") + 1 if content_str else 0
+        if lines > 1:
+            return f"✓ {lines} lines"
+        return f"✓ {len(content_str)} chars"
+
+    # verbose
+    if is_error:
+        return f"✗ Error: {content_str[:500]}"
+    total = len(content_str)
+    preview = content_str[:500]
+    if total > 500:
+        return f"Output:\n{preview}\n[truncated — {total} chars total]"
+    return f"Output:\n{preview}"
+
+
+def _format_thinking(thinking: str, show_thinking: bool) -> str | None:
+    """Format a thinking block as a Telegram spoiler. Returns None when disabled."""
+    if not show_thinking:
+        return None
+    return f"<tg-spoiler>💭 Thinking: {thinking}</tg-spoiler>"
+
+
 class AgentRunner(ABC):
     """Abstract base class for agent runners."""
 
