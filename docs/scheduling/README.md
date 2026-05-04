@@ -78,30 +78,19 @@ cron = "0 9 * * 1"
 agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 ```
 
-## Usage-aware skipping
+## Usage-aware skipping (not yet functional)
 
-`agent_prompt` jobs can be configured to skip automatically when Claude subscription usage is above a threshold. This prevents costly or rate-limited agent runs during high-usage periods.
+`agent_prompt` jobs accept `skip_if_five_hour_above`, `skip_if_seven_day_above`, and `notify_on_skip` fields, but **these are currently no-ops**. The Claude Agent SDK does not expose subscription usage percentages through its API, so Hive has no way to read the data needed to enforce the thresholds. Scheduled tasks will always run regardless of these values.
+
+A warning is emitted to the worker log at startup whenever a schedule entry has thresholds configured, so you can see the fields are present but inactive.
+
+The fields are kept in the schema for forward compatibility — they will be wired up once the SDK exposes usage data.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `skip_if_five_hour_above` | float | _(none)_ | Skip if 5-hour usage % ≥ this value (0–100) |
-| `skip_if_seven_day_above` | float | _(none)_ | Skip if 7-day usage % ≥ this value (0–100) |
-| `notify_on_skip` | bool | `true` | Send a Telegram message when the job is skipped |
-
-Both thresholds are optional and independent. If neither is set, the job always runs. If usage data is missing or stale, the job runs regardless (fail-open).
-
-`notify_on_skip` defaults to `true` — you'll get a Telegram message whenever a job is skipped. Set it to `false` for silent skipping.
-
-```toml
-[[schedule]]
-cron = "0 12 * * *"
-agent_prompt = "Run the midday analysis"
-skip_if_five_hour_above = 80.0
-skip_if_seven_day_above = 90.0
-notify_on_skip = false   # skip silently
-```
-
-Usage data is written to `~/.config/hive/usage.json` after each agent session by the Hive runtime. No additional setup is required.
+| `skip_if_five_hour_above` | float | _(none)_ | _(no-op)_ Intended to skip if 5-hour usage % ≥ this value |
+| `skip_if_seven_day_above` | float | _(none)_ | _(no-op)_ Intended to skip if 7-day usage % ≥ this value |
+| `notify_on_skip` | bool | `true` | _(no-op)_ Intended to send a Telegram message when the job is skipped |
 
 ## Combining both types
 
