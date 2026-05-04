@@ -36,7 +36,7 @@ def _summarize_input(input_dict: dict) -> str:
     if not input_dict:
         return ""
     first_val = str(next(iter(input_dict.values())))
-    return first_val.replace("\n", " ")[:60]
+    return first_val[:60].replace("\n", " ")
 
 
 def _format_tool_use(name: str, input_dict: dict, verbosity: str) -> str | None:
@@ -46,9 +46,11 @@ def _format_tool_use(name: str, input_dict: dict, verbosity: str) -> str | None:
     if verbosity == "minimal":
         return f"🔧 {name}"
     if verbosity in ("moderate", "detailed"):
-        return f"🔧 {name}: {_summarize_input(input_dict)}"
+        summary = _summarize_input(input_dict)
+        return f"🔧 {name}: {summary}" if summary else f"🔧 {name}"
     if verbosity == "verbose":
-        return f"🔧 {name}\nInput: {_summarize_input(input_dict)}"
+        summary = _summarize_input(input_dict)
+        return f"🔧 {name}\nInput: {summary}" if summary else f"🔧 {name}"
     return None
 
 
