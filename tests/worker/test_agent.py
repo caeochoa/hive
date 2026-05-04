@@ -875,3 +875,288 @@ def test_format_thinking_spoiler_when_enabled():
     assert "<tg-spoiler>" in result
     assert "💭" in result
     assert "some thoughts" in result
+
+
+# ------------------------------------------------------------------ #
+# stream() — one-shot path
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_yields_text(runner, worker_dir):
+    """stream() with chat_id=None yields TextBlock text."""
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "hello from one-shot"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert chunks == ["hello from one-shot"]
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_joins_multiple_text_blocks(runner, worker_dir):
+    """Multiple TextBlocks in one AssistantMessage are joined with newline."""
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tb1 = TextBlock()
+    tb1.text = "part one"
+    tb2 = TextBlock()
+    tb2.text = "part two"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [tb1, tb2]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert len(chunks) == 1
+    assert chunks[0] == "part one\npart two"
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_yields_tool_use_at_minimal(agent_config, commands_mcp, sessions_file, worker_dir):
+    """ToolUseBlock yields a minimal tool notification when tool_verbosity='minimal'."""
+    agent_config.tool_verbosity = "minimal"
+    agent_config.show_thinking = False
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ToolUseBlock = type("ToolUseBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tub = ToolUseBlock()
+    tub.name = "Bash"
+    tub.input = {"command": "ls"}
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [tub]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=ToolUseBlock,
+        ToolResultBlock=DummyMsg,
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert chunks == ["🔧 Bash"]
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_suppresses_tool_use_at_none(agent_config, commands_mcp, sessions_file, worker_dir):
+    """ToolUseBlock is not yielded when tool_verbosity='none'."""
+    agent_config.tool_verbosity = "none"
+    agent_config.show_thinking = False
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ToolUseBlock = type("ToolUseBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tub = ToolUseBlock()
+    tub.name = "Bash"
+    tub.input = {"command": "ls"}
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [tub]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=ToolUseBlock,
+        ToolResultBlock=DummyMsg,
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_yields_tool_result_at_verbose(agent_config, commands_mcp, sessions_file, worker_dir):
+    """ToolResultBlock in UserMessage is yielded when tool_verbosity='verbose'."""
+    agent_config.tool_verbosity = "verbose"
+    agent_config.show_thinking = False
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ToolResultBlock = type("ToolResultBlock", (), {})
+    UserMessage = type("UserMessage", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    trb = ToolResultBlock()
+    trb.content = "the output"
+    trb.is_error = False
+    user_msg = UserMessage()
+    user_msg.content = [trb]
+
+    async def mock_query(**kwargs):
+        yield user_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=UserMessage,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=ToolResultBlock,
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert any("Output:" in c for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_yields_thinking_when_enabled(agent_config, commands_mcp, sessions_file, worker_dir):
+    """ThinkingBlock is yielded as spoiler when show_thinking=True."""
+    agent_config.tool_verbosity = "none"
+    agent_config.show_thinking = True
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ThinkingBlock = type("ThinkingBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tb = ThinkingBlock()
+    tb.thinking = "let me think..."
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [tb]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=ThinkingBlock,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert any("<tg-spoiler>" in c for c in chunks)
+
+
+# ------------------------------------------------------------------ #
+# stream() — interactive path
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_stream_interactive_yields_text(runner, worker_dir, sessions_file):
+    """stream() with chat_id yields text and persists session from ResultMessage."""
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    ResultMessage = type("ResultMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tb = TextBlock()
+    tb.text = "interactive reply"
+    am = AssistantMessage()
+    am.content = [tb]
+
+    rm = ResultMessage()
+    rm.session_id = "sess-new"
+    rm.num_turns = 1
+    rm.total_cost_usd = None
+    rm.stop_reason = "end_turn"
+    rm.usage = None
+
+    async def mock_receive():
+        yield am
+        yield rm
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.receive_response = MagicMock(return_value=mock_receive())
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=mock_client),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=ResultMessage,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hi", chat_id=99, worker_dir=worker_dir)]
+
+    assert chunks == ["interactive reply"]
+    assert runner._sessions[99]["session_id"] == "sess-new"

@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
@@ -100,6 +101,10 @@ class AgentRunner(ABC):
     @abstractmethod
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
         """Run the agent with a message and return the response."""
+
+    @abstractmethod
+    def stream(self, message: str, chat_id: int | None, worker_dir: Path) -> AsyncIterator[str]:
+        """Stream agent response chunks as they arrive."""
 
     @abstractmethod
     async def close(self) -> None:
@@ -204,12 +209,13 @@ class ClaudeAgentRunner(AgentRunner):
                         length = sum(len(str(c)) for c in content)
                     else:
                         length = 0
+                    tool_use_id = getattr(block, "tool_use_id", "unknown")
                     if block.is_error:
                         preview = str(content)[:120] if content else ""
-                        logger.error("[tool_error] %s → %s", block.tool_use_id[:8], preview)
+                        logger.error("[tool_error] %s → %s", tool_use_id[:8], preview)
                     else:
-                        logger.info("[tool_result] %s → %d chars", block.tool_use_id[:8], length)
-                        logger.debug("[tool_result] %s full=%r", block.tool_use_id[:8], content)
+                        logger.info("[tool_result] %s → %d chars", tool_use_id[:8], length)
+                        logger.debug("[tool_result] %s full=%r", tool_use_id[:8], content)
                 elif isinstance(block, ThinkingBlock):
                     logger.info("[thinking] %d chars", len(block.thinking))
                     logger.debug("[thinking] %s", block.thinking)
@@ -332,6 +338,148 @@ class ClaudeAgentRunner(AgentRunner):
         if chat_id is None:
             return await self._run_one_shot(message)
         return await self._run_interactive(message, chat_id)
+
+    async def stream(
+        self, message: str, chat_id: int | None, worker_dir: Path
+    ) -> AsyncIterator[str]:
+        """Yield formatted chunks as the agent works (text, tool notifications, thinking)."""
+        if chat_id is None:
+            async for chunk in self._stream_one_shot(message):
+                yield chunk
+        else:
+            async for chunk in self._stream_interactive(message, chat_id):
+                yield chunk
+
+    async def _stream_one_shot(self, message: str) -> AsyncIterator[str]:
+        """Yield chunks for a one-shot prompt with a disposable client."""
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            TextBlock,
+            ThinkingBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
+            query,
+        )
+
+        thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
+        tool_verbosity = getattr(self._config, "tool_verbosity", "none")
+        show_thinking = getattr(self._config, "show_thinking", False)
+
+        options = ClaudeAgentOptions(
+            system_prompt=getattr(
+                self._config,
+                "system_prompt",
+                "You are a worker agent. Your world is this folder.",
+            ),
+            allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
+            permission_mode="bypassPermissions",
+            cwd=str(self._worker_dir),
+            mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
+            model=self._config.model,
+            max_turns=self._config.max_turns,
+            **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
+               if thinking_budget is not None else {}),
+        )
+
+        logger.info("Agent one-shot query: %r", message[:80])
+        t0 = time.monotonic()
+
+        async for msg in query(prompt=message, options=options):
+            self._log_sdk_message(msg)
+            if isinstance(msg, AssistantMessage):
+                text_parts: list[str] = []
+                for block in msg.content:
+                    if isinstance(block, ThinkingBlock):
+                        chunk = _format_thinking(block.thinking, show_thinking)
+                        if chunk:
+                            yield chunk
+                    elif isinstance(block, TextBlock):
+                        text_parts.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        chunk = _format_tool_use(block.name, block.input, tool_verbosity)
+                        if chunk:
+                            yield chunk
+                if text_parts:
+                    yield "\n".join(text_parts)
+            elif isinstance(msg, UserMessage):
+                for block in msg.content:
+                    if isinstance(block, ToolResultBlock):
+                        chunk = _format_tool_result(block.content, block.is_error, tool_verbosity)
+                        if chunk:
+                            yield chunk
+
+        elapsed = time.monotonic() - t0
+        logger.info("Agent one-shot complete in %.1fs", elapsed)
+
+    async def _stream_interactive(self, message: str, chat_id: int) -> AsyncIterator[str]:
+        """Yield chunks within a persistent, locked session."""
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ResultMessage,
+            TextBlock,
+            ThinkingBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
+        )
+
+        tool_verbosity = getattr(self._config, "tool_verbosity", "none")
+        show_thinking = getattr(self._config, "show_thinking", False)
+
+        lock = self._get_lock(chat_id)
+        async with lock:
+            if chat_id in self._pending_override_reset and chat_id in self._clients:
+                await self._close_client(chat_id)
+                self._pending_override_reset.discard(chat_id)
+
+            logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
+            t0 = time.monotonic()
+
+            token = _current_chat_id.set(chat_id)
+            try:
+                client = await self._get_or_create_client(chat_id)
+                await client.query(message)
+
+                async for msg in client.receive_response():
+                    self._log_sdk_message(msg)
+                    if isinstance(msg, AssistantMessage):
+                        text_parts: list[str] = []
+                        for block in msg.content:
+                            if isinstance(block, ThinkingBlock):
+                                chunk = _format_thinking(block.thinking, show_thinking)
+                                if chunk:
+                                    yield chunk
+                            elif isinstance(block, TextBlock):
+                                text_parts.append(block.text)
+                            elif isinstance(block, ToolUseBlock):
+                                chunk = _format_tool_use(block.name, block.input, tool_verbosity)
+                                if chunk:
+                                    yield chunk
+                        if text_parts:
+                            yield "\n".join(text_parts)
+                    elif isinstance(msg, UserMessage):
+                        for block in msg.content:
+                            if isinstance(block, ToolResultBlock):
+                                chunk = _format_tool_result(
+                                    block.content, block.is_error, tool_verbosity
+                                )
+                                if chunk:
+                                    yield chunk
+                    elif isinstance(msg, ResultMessage):
+                        if msg.session_id:
+                            self._sessions[chat_id] = {
+                                "chat_id": chat_id,
+                                "session_id": msg.session_id,
+                            }
+                            logger.debug("Session updated for chat_id=%d", chat_id)
+            finally:
+                _current_chat_id.reset(token)
+
+            elapsed = time.monotonic() - t0
+            logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
+            self._save_sessions()
 
     async def _run_one_shot(self, message: str) -> str:
         """Execute a one-shot prompt with a disposable client."""
