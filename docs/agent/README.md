@@ -15,6 +15,8 @@ All agent settings live under the `[agent]` section.
 | `max_turns` | int | `10` | Maximum agent turns per incoming message |
 | `system_prompt` | string | _(none)_ | Custom system prompt. If set, self-config instructions are NOT appended (see §6) |
 | `thinking_budget_tokens` | int | _(none)_ | Enable extended thinking with this token budget (see §5) |
+| `tool_verbosity` | string | `"none"` | Tool execution visibility: `none` \| `minimal` \| `moderate` \| `detailed` \| `verbose` (see §9) |
+| `show_thinking` | bool | `false` | Send extended thinking blocks as Telegram spoilers (see §9) |
 
 ```toml
 [agent]
@@ -23,6 +25,8 @@ memory_dir = "memory/"
 max_turns = 10
 # system_prompt = "You are a budget tracker assistant."
 # thinking_budget_tokens = 5000
+# tool_verbosity = "moderate"
+# show_thinking = true
 ```
 
 ---
@@ -206,8 +210,8 @@ Each `AssistantMessage` from the Claude Agent SDK is sent to Telegram as it arri
 | `minimal` | `🔧 Bash` — tool name only |
 | `moderate` | `🔧 Bash: ls -la /tmp` — name + truncated input, no result |
 | `detailed` | Name + input, then a second message with `✓ N lines` or `✗ error` |
-| `verbose` | Name + input, then a second message with truncated output (≤500 chars) |
+| `verbose` | `🔧 Name\nInput: ...`, then a second message with up to 500 chars of output or `✗ Error: ...` |
 
 ### Thinking blocks
 
-When `show_thinking = true`, extended thinking blocks appear as Telegram spoiler messages (tap to reveal). Hidden by default — useful when debugging agent reasoning.
+When `show_thinking = true`, extended thinking blocks appear as Telegram spoiler messages (tap to reveal). Hidden by default — useful when debugging agent reasoning. Extended thinking must also be enabled via `thinking_budget_tokens` (see §5); without it, no thinking blocks are produced.

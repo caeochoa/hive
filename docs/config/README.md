@@ -48,8 +48,8 @@ name = "budget"
 | `max_turns` | int | `10` | Max agent turns per incoming message |
 | `system_prompt` | string | _(none)_ | Custom system prompt. If set, self-configuration instructions are not added |
 | `thinking_budget_tokens` | int | _(none)_ | Token budget for extended thinking. Omit to disable |
-| `tool_verbosity` | `"none"` | How much detail to show for tool executions: `none` \| `minimal` \| `moderate` \| `detailed` \| `verbose` |
-| `show_thinking` | `false` | When `true`, extended thinking blocks are sent as Telegram spoilers |
+| `tool_verbosity` | string | `"none"` | How much detail to show for tool executions: `none` \| `minimal` \| `moderate` \| `detailed` \| `verbose` |
+| `show_thinking` | bool | `false` | When `true`, extended thinking blocks are sent as Telegram spoilers |
 
 ```toml
 [agent]
@@ -59,7 +59,7 @@ max_turns = 10
 # system_prompt = "You are a budget tracker. Be concise."
 # thinking_budget_tokens = 5000
 # tool_verbosity = "moderate"    # none | minimal | moderate | detailed | verbose
-# show_thinking = false          # send thinking blocks as Telegram spoilers
+# show_thinking = true           # send thinking blocks as Telegram spoilers
 ```
 
 Note: setting `system_prompt` disables the default self-config instructions. The agent will not know it can edit `hive.toml` or `commands/` unless you include that guidance yourself.

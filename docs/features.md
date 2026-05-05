@@ -96,6 +96,12 @@ Workers can surface intermediate agent activity to Telegram as it happens:
 - Tool executions appear as Telegram messages with configurable verbosity (`none` / `minimal` / `moderate` / `detailed` / `verbose`)
 - Extended thinking blocks can be shown as spoilers
 
+```toml
+[agent]
+tool_verbosity = "moderate"   # show tool name + input as messages
+show_thinking = true          # show thinking blocks as spoilers (requires thinking_budget_tokens)
+```
+
 ---
 
 ## Worker Self-Configuration
