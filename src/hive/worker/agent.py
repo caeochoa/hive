@@ -103,7 +103,7 @@ class AgentRunner(ABC):
         """Run the agent with a message and return the response."""
 
     @abstractmethod
-    def stream(self, message: str, chat_id: int | None, worker_dir: Path) -> AsyncIterator[str]:
+    async def stream(self, message: str, chat_id: int | None, worker_dir: Path) -> AsyncIterator[str]:
         """Stream agent response chunks as they arrive."""
 
     @abstractmethod
