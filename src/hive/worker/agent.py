@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import logging
 import time
@@ -89,10 +90,13 @@ def _format_tool_result(content: Any, is_error: bool, verbosity: str) -> str | N
 
 
 def _format_thinking(thinking: str, show_thinking: bool) -> str | None:
-    """Format a thinking block as a Telegram spoiler. Returns None when disabled."""
+    """Format a thinking block as a Telegram spoiler. Returns None when disabled.
+
+    Returns raw HTML (not markdown) — callers must NOT pass this through md_to_telegram_html.
+    """
     if not show_thinking:
         return None
-    return f"<tg-spoiler>💭 Thinking: {thinking}</tg-spoiler>"
+    return f"<tg-spoiler>💭 Thinking: {_html.escape(thinking)}</tg-spoiler>"
 
 
 class AgentRunner(ABC):

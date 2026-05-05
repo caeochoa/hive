@@ -881,6 +881,15 @@ def test_format_thinking_spoiler_when_enabled():
     assert "some thoughts" in result
 
 
+def test_format_thinking_escapes_html_in_content():
+    from hive.worker.agent import _format_thinking
+    result = _format_thinking("<b>bold</b> & more", True)
+    assert result is not None
+    assert "&lt;b&gt;" in result
+    assert "&amp;" in result
+    assert "<tg-spoiler>" in result
+
+
 # ------------------------------------------------------------------ #
 # stream() — one-shot path
 # ------------------------------------------------------------------ #
