@@ -188,7 +188,7 @@ Example log output:
 
 ---
 
-## Streaming messages
+## 9. Streaming messages
 
 By default the agent sends a single Telegram message when it finishes. You can change this behaviour with two optional `[agent]` fields in `hive.toml`.
 
