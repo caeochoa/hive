@@ -239,29 +239,58 @@ class TestRegisterHandlers:
 
 class TestHandleNlMessage:
     @pytest.mark.asyncio
-    async def test_routes_to_agent_and_replies(self, tmp_path):
+    async def test_routes_to_agent_stream_and_sends_chunks(self, tmp_path):
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
-        rt._agent.run = AsyncMock(return_value="Agent says hi")
+
+        async def mock_stream(*args, **kwargs):
+            yield "Agent says hi"
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream
 
         update = MagicMock()
         update.effective_user.id = 42
         update.effective_chat.id = 100
         update.message.text = "hello"
-        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
 
         with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock) as mock_send:
             with patch.object(rt, "_auto_commit", new_callable=AsyncMock) as mock_commit:
+                await rt._handle_nl_message(update, context)
+
+        mock_send.assert_awaited_once_with(
+            (context.bot, 100), "Agent says hi", parse_mode="HTML"
+        )
+        mock_commit.assert_awaited_once_with("agent turn")
+
+    @pytest.mark.asyncio
+    async def test_sends_multiple_chunks_separately(self, tmp_path):
+        rt = _make_runtime(tmp_path)
+
+        async def mock_stream(*args, **kwargs):
+            yield "First"
+            yield "Second"
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock) as mock_send:
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
                 await rt._handle_nl_message(update, MagicMock())
 
-        rt._agent.run.assert_awaited_once_with("hello", 100, tmp_path)
-        mock_send.assert_awaited_once_with(update.message, "Agent says hi", parse_mode="HTML")
-        mock_commit.assert_awaited_once_with("agent turn")
+        assert mock_send.await_count == 2
 
     @pytest.mark.asyncio
     async def test_rejects_unauthorized_user(self, tmp_path):
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
+        rt._agent = MagicMock()
+        rt._agent.stream = MagicMock()
 
         update = MagicMock()
         update.effective_user.id = 99  # not allowed
@@ -270,15 +299,19 @@ class TestHandleNlMessage:
         with patch.object(rt, "_auto_commit", new_callable=AsyncMock) as mock_commit:
             await rt._handle_nl_message(update, MagicMock())
 
-        rt._agent.run.assert_not_awaited()
-        # Early return means no auto-commit either
+        rt._agent.stream.assert_not_called()
         mock_commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_handles_agent_error_gracefully(self, tmp_path):
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
-        rt._agent.run = AsyncMock(side_effect=RuntimeError("boom"))
+
+        async def mock_stream_raises(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # make it a generator
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream_raises
 
         update = MagicMock()
         update.effective_user.id = 42
@@ -389,8 +422,12 @@ class TestHandleNlMessageWithRestart:
     @pytest.mark.asyncio
     async def test_triggers_restart_when_config_changed(self, tmp_path):
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
-        rt._agent.run = AsyncMock(return_value="ok")
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream
         rt._app = MagicMock()
         rt._app.bot.send_message = AsyncMock()
 
@@ -419,8 +456,13 @@ class TestHandleNlMessageWithRestart:
     async def test_no_restart_on_agent_error_even_if_files_changed(self, tmp_path):
         """Config change detected after an agent error must NOT trigger restart."""
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
-        rt._agent.run = AsyncMock(side_effect=RuntimeError("agent blew up"))
+
+        async def mock_stream_raises(*args, **kwargs):
+            raise RuntimeError("agent blew up")
+            yield  # make it a generator
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream_raises
         rt._app = MagicMock()
         rt._app.bot.send_message = AsyncMock()
 
@@ -445,8 +487,12 @@ class TestHandleNlMessageWithRestart:
     @pytest.mark.asyncio
     async def test_no_restart_when_files_unchanged(self, tmp_path):
         rt = _make_runtime(tmp_path)
-        rt._agent = AsyncMock()
-        rt._agent.run = AsyncMock(return_value="ok")
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream
         rt._app = MagicMock()
         rt._app.bot.send_message = AsyncMock()
 

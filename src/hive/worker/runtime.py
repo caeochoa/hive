@@ -91,6 +91,8 @@ class WorkerRuntime:
             max_turns=self._config.agent_max_turns,
             memory_dir=self._config.agent_memory_dir,
             thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
+            tool_verbosity=self._config.agent_tool_verbosity,    # NEW
+            show_thinking=self._config.agent_show_thinking,       # NEW
         )
         sessions_file = (
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"
@@ -238,17 +240,14 @@ class WorkerRuntime:
 
         try:
             async with typing_action(context.bot, chat_id):
-                response = await self._agent.run(
+                async for chunk in self._agent.stream(
                     update.message.text,
                     chat_id,
                     self._config.worker_dir,
-                )
-            await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
+                ):
+                    html = md_to_telegram_html(chunk)
+                    await send_long_message((context.bot, chat_id), html, parse_mode="HTML")
 
-            # Note: snapshot is taken inside the try block so that errors during
-            # send_long_message (e.g. Telegram network failure) also skip the restart.
-            # This is intentional: if we couldn't deliver the response, we don't know
-            # whether the agent finished cleanly, so we err on the side of no restart.
             after = self._snapshot_worker_paths()
             if self._detect_worker_changes(before, after):
                 logger.info("Worker config files changed — scheduling restart")
