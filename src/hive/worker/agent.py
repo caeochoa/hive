@@ -329,15 +329,15 @@ class ClaudeAgentRunner(AgentRunner):
     # ------------------------------------------------------------------ #
 
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
-        """Run the agent.
+        """Run the agent and return the full response as a single string.
 
-        Two paths:
-        - chat_id is None  -> one-shot: create disposable client, run, close
-        - chat_id not None -> locked, persistent session
+        Accumulates all chunks from stream() joined with '\n---\n'.
+        Use stream() directly for real-time delivery.
         """
-        if chat_id is None:
-            return await self._run_one_shot(message)
-        return await self._run_interactive(message, chat_id)
+        parts: list[str] = []
+        async for chunk in self.stream(message, chat_id, worker_dir):
+            parts.append(chunk)
+        return "\n---\n".join(parts)
 
     async def stream(
         self, message: str, chat_id: int | None, worker_dir: Path
@@ -480,85 +480,6 @@ class ClaudeAgentRunner(AgentRunner):
             elapsed = time.monotonic() - t0
             logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
             self._save_sessions()
-
-    async def _run_one_shot(self, message: str) -> str:
-        """Execute a one-shot prompt with a disposable client."""
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
-
-        thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
-        options = ClaudeAgentOptions(
-            system_prompt=getattr(
-                self._config,
-                "system_prompt",
-                "You are a worker agent. Your world is this folder.",
-            ),
-            allowed_tools=["Read", "Write", "Bash", "Glob", *self._command_names],
-            permission_mode="bypassPermissions",
-            cwd=str(self._worker_dir),
-            mcp_servers=({"commands": self._commands_mcp} if self._commands_mcp is not None else {}),
-            model=self._config.model,
-            max_turns=self._config.max_turns,
-            **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
-               if thinking_budget is not None else {}),
-        )
-
-        logger.info("Agent one-shot query: %r", message[:80])
-        t0 = time.monotonic()
-        parts: list[str] = []
-        async for msg in query(prompt=message, options=options):
-            self._log_sdk_message(msg)
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        parts.append(block.text)
-        elapsed = time.monotonic() - t0
-        response = "".join(parts)
-        logger.info("Agent one-shot complete: %d chars in %.1fs", len(response), elapsed)
-        return response
-
-    async def _run_interactive(self, message: str, chat_id: int) -> str:
-        """Execute a message within a persistent, locked session."""
-        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-
-        lock = self._get_lock(chat_id)
-        async with lock:
-            # If overrides changed since last turn, close the stale client so
-            # _get_or_create_client rebuilds it with the new options.
-            if chat_id in self._pending_override_reset and chat_id in self._clients:
-                await self._close_client(chat_id)
-                self._pending_override_reset.discard(chat_id)
-
-            logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
-            t0 = time.monotonic()
-
-            # Set ContextVar so builtin MCP tool handlers can identify this session.
-            token = _current_chat_id.set(chat_id)
-            try:
-                client = await self._get_or_create_client(chat_id)
-                await client.query(message)
-
-                parts: list[str] = []
-                async for msg in client.receive_response():
-                    self._log_sdk_message(msg)
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                parts.append(block.text)
-                    elif isinstance(msg, ResultMessage):
-                        if msg.session_id:
-                            self._sessions[chat_id] = {
-                                "chat_id": chat_id,
-                                "session_id": msg.session_id,
-                            }
-                            logger.debug("Session updated for chat_id=%d", chat_id)
-            finally:
-                _current_chat_id.reset(token)
-
-            elapsed = time.monotonic() - t0
-            response = "".join(parts)
-            logger.info("Agent response chat_id=%d: %d chars in %.1fs", chat_id, len(response), elapsed)
-            self._save_sessions()
-            return response
 
     # ------------------------------------------------------------------ #
     # Reset / Close

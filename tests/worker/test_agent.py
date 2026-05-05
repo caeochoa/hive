@@ -450,7 +450,8 @@ async def test_thinking_kwarg_not_passed_when_none(runner):
     mock_sdk.query = MagicMock(return_value=_async_empty())
 
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
-        await runner._run_one_shot("test")
+        async for _ in runner._stream_one_shot("test"):
+            pass
 
     assert "thinking" not in options_kwargs
 
@@ -488,7 +489,8 @@ async def test_thinking_kwarg_passed_when_set(agent_config, commands_mcp, sessio
     mock_sdk.query = MagicMock(return_value=_async_empty())
 
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
-        await r._run_one_shot("test")
+        async for _ in r._stream_one_shot("test"):
+            pass
 
     assert options_kwargs.get("thinking") == {"type": "enabled", "budget_tokens": 5000}
 
@@ -704,7 +706,8 @@ async def test_pending_override_reset_closes_stale_client(runner, worker_dir):
     )
 
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
-        await runner._run_interactive("hello", 42)
+        async for _ in runner._stream_interactive("hello", 42):
+            pass
 
     # Old exit stack should have been closed
     mock_stack.aclose.assert_awaited_once()
@@ -759,7 +762,8 @@ async def test_contextvar_set_during_run_interactive(runner, worker_dir):
     )
 
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
-        await runner._run_interactive("hello", 77)
+        async for _ in runner._stream_interactive("hello", 77):
+            pass
 
     assert captured_chat_id == [77]
     # ContextVar reset after the turn
@@ -1160,3 +1164,48 @@ async def test_stream_interactive_yields_text(runner, worker_dir, sessions_file)
 
     assert chunks == ["interactive reply"]
     assert runner._sessions[99]["session_id"] == "sess-new"
+
+
+# ------------------------------------------------------------------ #
+# run() accumulates stream() chunks
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_run_accumulates_stream_with_separator(runner, worker_dir):
+    """run() collects stream() chunks and joins them with \n---\n."""
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tb1 = TextBlock()
+    tb1.text = "first"
+    am1 = AssistantMessage()
+    am1.content = [tb1]
+
+    tb2 = TextBlock()
+    tb2.text = "second"
+    am2 = AssistantMessage()
+    am2.content = [tb2]
+
+    async def mock_query(**kwargs):
+        yield am1
+        yield am2
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        result = await runner.run("hello", chat_id=None, worker_dir=worker_dir)
+
+    assert result == "first\n---\nsecond"
