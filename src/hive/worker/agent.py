@@ -28,7 +28,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "These overrides reset on /reset or worker restart."
 )
 
-# ContextVar set by _run_interactive so builtin MCP tools can identify the caller.
+# ContextVar set by _stream_interactive so builtin MCP tools can identify the caller.
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
 
 
