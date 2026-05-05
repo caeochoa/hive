@@ -326,6 +326,40 @@ class TestHandleNlMessage:
             "Something went wrong. Check the logs."
         )
 
+    @pytest.mark.asyncio
+    async def test_handles_send_error_mid_stream(self, tmp_path):
+        """A Telegram send failure mid-stream surfaces the generic error message."""
+        rt = _make_runtime(tmp_path)
+
+        async def mock_stream(*args, **kwargs):
+            yield "First chunk"
+            yield "Second chunk"
+
+        rt._agent = MagicMock()
+        rt._agent.stream = mock_stream
+
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 100
+        update.message.text = "hello"
+        update.message.reply_text = AsyncMock()
+
+        call_count = 0
+
+        async def failing_send(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("Telegram send failure")
+
+        with patch("hive.worker.runtime.send_long_message", side_effect=failing_send):
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                await rt._handle_nl_message(update, MagicMock())
+
+        update.message.reply_text.assert_awaited_once_with(
+            "Something went wrong. Check the logs."
+        )
+
 
 # ------------------------------------------------------------------ #
 # _snapshot_worker_paths

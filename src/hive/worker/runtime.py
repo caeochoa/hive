@@ -245,9 +245,14 @@ class WorkerRuntime:
                     chat_id,
                     self._config.worker_dir,
                 ):
+                    # md_to_telegram_html is applied per-chunk (SDK message boundaries);
+                    # markdown spanning consecutive messages won't be stitched.
                     html = md_to_telegram_html(chunk)
                     await send_long_message((context.bot, chat_id), html, parse_mode="HTML")
 
+            # Snapshot is taken inside try so that any Telegram send failure during
+            # the stream aborts restart detection — we don't restart if we couldn't
+            # confirm the agent finished cleanly.
             after = self._snapshot_worker_paths()
             if self._detect_worker_changes(before, after):
                 logger.info("Worker config files changed — scheduling restart")
