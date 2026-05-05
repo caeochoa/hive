@@ -185,3 +185,29 @@ Example log output:
 2025-03-27 10:00:02 hive.worker.agent INFO [tool_result] a1b2c3d4 → 412 chars
 2025-03-27 10:00:03 hive.worker.agent INFO [result] turns=2 cost=$0.0012 stop=end_turn
 ```
+
+---
+
+## Streaming messages
+
+By default the agent sends a single Telegram message when it finishes. You can change this behaviour with two optional `[agent]` fields in `hive.toml`.
+
+### Per-message delivery
+
+Each `AssistantMessage` from the Claude Agent SDK is sent to Telegram as it arrives — users see text responses as the agent produces them rather than waiting for the full turn to complete.
+
+### Tool verbosity
+
+`tool_verbosity` controls whether tool executions appear as Telegram messages:
+
+| Level | What appears |
+|---|---|
+| `none` (default) | Tool uses are silent |
+| `minimal` | `🔧 Bash` — tool name only |
+| `moderate` | `🔧 Bash: ls -la /tmp` — name + truncated input, no result |
+| `detailed` | Name + input, then a second message with `✓ N lines` or `✗ error` |
+| `verbose` | Name + input, then a second message with truncated output (≤500 chars) |
+
+### Thinking blocks
+
+When `show_thinking = true`, extended thinking blocks appear as Telegram spoiler messages (tap to reveal). Hidden by default — useful when debugging agent reasoning.
