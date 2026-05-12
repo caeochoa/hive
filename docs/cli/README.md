@@ -85,6 +85,33 @@ hive status
 
 Output is the raw `supervisorctl status` output. Each line shows the process name, state (RUNNING, STOPPED, FATAL, etc.), and uptime.
 
+## `hive upgrade`
+
+Re-apply all process management configuration for the current installation. Run this after upgrading Hive, or if Workers fail to start after a system reboot.
+
+```
+hive upgrade
+```
+
+What it does:
+
+1. Ensures `supervisord.conf` runs supervisord in foreground mode (`nodaemon=true`), required for correct launchd supervision. Migrates existing configs automatically.
+2. Regenerates the macOS LaunchAgent plist (`~/Library/LaunchAgents/com.hive.supervisord.plist`) if it is missing the `EnvironmentVariables` section, so supervisord and its child processes inherit the user's `PATH`.
+3. Rewrites every registered Worker's supervisord conf to use the absolute path to `hive`, so Workers start correctly under launchd's minimal environment.
+4. Rewrites the Comb dashboard conf with the absolute `hive` path.
+5. Signals supervisord to reload and apply all changes.
+
+**When to run:**
+
+- Workers aren't running after a Mac reboot
+- After `uv tool install hive` or `uv tool upgrade hive` on a machine with existing Workers
+- After any manual change to supervisord configs that may have reverted settings
+
+```bash
+hive upgrade
+hive status   # verify all workers are RUNNING
+```
+
 ## `hive logs <path> [-n <lines>] [-f]`
 
 Tail the Worker's stdout log at `<worker>/logs/out.log`.

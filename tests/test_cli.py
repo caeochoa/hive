@@ -243,3 +243,45 @@ class TestRun:
     def test_run_fails_on_bad_config(self, tmp_path):
         result = runner.invoke(app, ["run", str(tmp_path)])
         assert result.exit_code == 1
+
+
+class TestUpgrade:
+    def test_upgrade_command_exists(self):
+        result = runner.invoke(app, ["upgrade", "--help"])
+        assert result.exit_code == 0
+
+    def test_upgrade_calls_all_migration_functions(self):
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch("hive.shared.supervisor.ensure_supervisord_conf") as mock_ensure,
+            patch("hive.shared.supervisor.install_launchagent") as mock_install,
+            patch("hive.shared.supervisor.write_comb_block") as mock_comb,
+            patch("hive.shared.supervisor.reload_supervisord") as mock_reload,
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        mock_ensure.assert_called_once()
+        mock_install.assert_called_once()
+        mock_comb.assert_called_once()
+        mock_reload.assert_called_once()
+
+    def test_upgrade_rewrites_worker_confs(self, tmp_path):
+        from hive.shared.models import WorkerEntry
+
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = [
+            WorkerEntry(name="budget", path=str(tmp_path)),
+        ]
+        with (
+            patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.install_launchagent"),
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch("hive.shared.supervisor.write_comb_block"),
+            patch("hive.shared.supervisor.write_worker_block") as mock_write,
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        mock_write.assert_called_once_with("budget", tmp_path)
