@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,7 +11,7 @@ LAUNCHAGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.hive.supervi
 
 SUPERVISORD_CONF_TEMPLATE = """\
 [supervisord]
-nodaemon=false
+nodaemon=true
 logfile={home}/.config/hive/supervisord/supervisord.log
 pidfile={home}/.config/hive/supervisord/supervisord.pid
 
@@ -29,7 +30,7 @@ files = {conf_dir}/*.conf
 
 WORKER_BLOCK_TEMPLATE = """\
 [program:worker-{name}]
-command=hive run {path}
+command={hive} run {path}
 directory={path}
 autostart=true
 autorestart=true
@@ -39,7 +40,7 @@ stderr_logfile={path}/logs/err.log
 
 COMB_BLOCK_TEMPLATE = """\
 [program:hive-comb]
-command=hive comb serve --host 0.0.0.0
+command={hive} comb serve --host 0.0.0.0
 autostart=true
 autorestart=true
 stdout_logfile={home}/.config/hive/comb.log
@@ -60,6 +61,11 @@ LAUNCHAGENT_TEMPLATE = """\
     <string>-c</string>
     <string>{conf}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{path}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -74,10 +80,13 @@ def get_worker_conf_path(name: str, conf_dir: Path = DEFAULT_CONF_DIR) -> Path:
 
 
 def write_worker_block(name: str, worker_path: Path, conf_dir: Path = DEFAULT_CONF_DIR) -> None:
+    hive_bin = shutil.which("hive")
+    if not hive_bin:
+        raise RuntimeError("hive not found in PATH")
     conf_dir.mkdir(parents=True, exist_ok=True)
     conf_file = get_worker_conf_path(name, conf_dir)
     conf_file.write_text(
-        WORKER_BLOCK_TEMPLATE.format(name=name, path=str(worker_path))
+        WORKER_BLOCK_TEMPLATE.format(name=name, path=str(worker_path), hive=hive_bin)
     )
 
 
@@ -88,25 +97,38 @@ def remove_worker_block(name: str, conf_dir: Path = DEFAULT_CONF_DIR) -> None:
 
 
 def ensure_supervisord_conf(conf_dir: Path = DEFAULT_CONF_DIR) -> None:
-    """Create the main supervisord.conf if it doesn't exist."""
+    """Create the main supervisord.conf if it doesn't exist, or migrate nodaemon setting."""
     SUPERVISORD_CONF.parent.mkdir(parents=True, exist_ok=True)
     if not SUPERVISORD_CONF.exists():
         home = Path.home()
         SUPERVISORD_CONF.write_text(
             SUPERVISORD_CONF_TEMPLATE.format(home=home, conf_dir=conf_dir)
         )
+    else:
+        content = SUPERVISORD_CONF.read_text()
+        if "nodaemon=false" in content:
+            SUPERVISORD_CONF.write_text(content.replace("nodaemon=false", "nodaemon=true", 1))
 
 
 def write_comb_block(conf_dir: Path = DEFAULT_CONF_DIR) -> None:
+    hive_bin = shutil.which("hive")
+    if not hive_bin:
+        raise RuntimeError("hive not found in PATH")
     conf_dir.mkdir(parents=True, exist_ok=True)
     comb_conf = conf_dir / "hive-comb.conf"
-    comb_conf.write_text(COMB_BLOCK_TEMPLATE.format(home=Path.home()))
+    comb_conf.write_text(COMB_BLOCK_TEMPLATE.format(home=Path.home(), hive=hive_bin))
 
 
 def install_launchagent() -> bool:
-    """Install macOS LaunchAgent for supervisord. Returns True if newly installed."""
-    newly_written = False
-    if not LAUNCHAGENT_PLIST.exists():
+    """Install macOS LaunchAgent for supervisord. Returns True if newly installed or migrated."""
+    needs_write = not LAUNCHAGENT_PLIST.exists()
+
+    if not needs_write and "EnvironmentVariables" not in LAUNCHAGENT_PLIST.read_text():
+        # Existing plist lacks PATH injection — unload before rewriting
+        subprocess.run(["launchctl", "unload", str(LAUNCHAGENT_PLIST)], capture_output=True)
+        needs_write = True
+
+    if needs_write:
         supervisord_bin = shutil.which("supervisord")
         if not supervisord_bin:
             raise RuntimeError("supervisord not found in PATH")
@@ -115,15 +137,15 @@ def install_launchagent() -> bool:
             LAUNCHAGENT_TEMPLATE.format(
                 supervisord=supervisord_bin,
                 conf=str(SUPERVISORD_CONF),
+                path=os.environ.get("PATH", ""),
             )
         )
-        newly_written = True
 
     # -w ensures the service is marked enabled so it auto-loads after reboots
     result = subprocess.run(["launchctl", "load", "-w", str(LAUNCHAGENT_PLIST)])
     if result.returncode != 0:
         raise RuntimeError(f"launchctl load -w failed (exit {result.returncode})")
-    return newly_written
+    return needs_write
 
 
 def supervisorctl(*args: str) -> subprocess.CompletedProcess:
