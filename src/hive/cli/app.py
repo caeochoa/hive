@@ -287,6 +287,41 @@ def chat(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     asyncio.run(run_tui(config))
 
 
+@app.command()
+def upgrade() -> None:
+    """Re-apply process management config. Run after upgrading Hive or if workers don't start after reboot."""
+    from hive.shared.registry import HiveRegistry
+    from hive.shared.supervisor import (
+        ensure_supervisord_conf,
+        install_launchagent,
+        reload_supervisord,
+        write_comb_block,
+        write_worker_block,
+    )
+
+    typer.echo("Upgrading Hive configuration...")
+
+    ensure_supervisord_conf()
+    typer.echo("  supervisord.conf: OK")
+
+    try:
+        install_launchagent()
+        typer.echo("  LaunchAgent: OK")
+    except RuntimeError as e:
+        typer.echo(f"  Warning: {e}", err=True)
+
+    registry = HiveRegistry()
+    for entry in registry.list_workers():
+        write_worker_block(entry.name, Path(entry.path))
+        typer.echo(f"  worker-{entry.name}: conf updated")
+
+    write_comb_block()
+    typer.echo("  hive-comb: conf updated")
+
+    reload_supervisord()
+    typer.echo("Done. Run 'hive status' to verify.")
+
+
 comb_app = typer.Typer(help="Manage the Comb dashboard server.")
 app.add_typer(comb_app, name="comb")
 
