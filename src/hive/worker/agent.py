@@ -34,11 +34,11 @@ _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", defaul
 
 
 def _summarize_input(input_dict: dict) -> str:
-    """Return first value of input dict, single-line, truncated to 60 chars."""
+    """Return all key=value pairs of input dict, single-line, truncated to 60 chars."""
     if not input_dict:
         return ""
-    first_val = str(next(iter(input_dict.values())))
-    return first_val[:60].replace("\n", " ")
+    summary = ", ".join(f"{k}={v!r}" for k, v in input_dict.items())
+    return summary[:60].replace("\n", " ")
 
 
 def _format_tool_use(name: str, input_dict: dict, verbosity: str) -> str | None:

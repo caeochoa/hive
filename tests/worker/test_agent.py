@@ -789,13 +789,13 @@ def test_format_tool_use_minimal():
 def test_format_tool_use_moderate():
     from hive.worker.agent import _format_tool_use
     result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "moderate")
-    assert result == "🔧 Bash: ls -la /tmp"
+    assert result == "🔧 Bash: command='ls -la /tmp'"
 
 
 def test_format_tool_use_detailed_same_as_moderate():
     from hive.worker.agent import _format_tool_use
     result = _format_tool_use("Bash", {"command": "ls -la /tmp"}, "detailed")
-    assert result == "🔧 Bash: ls -la /tmp"
+    assert result == "🔧 Bash: command='ls -la /tmp'"
 
 
 def test_format_tool_use_verbose_shows_input_label():
