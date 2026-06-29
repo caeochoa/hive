@@ -444,51 +444,64 @@ class ClaudeAgentRunner(AgentRunner):
         logger.info("Agent one-shot complete in %.1fs", elapsed)
 
     async def _stream_interactive(self, message: str, chat_id: int) -> AsyncIterator[StreamChunk]:
-        """Collect chunks within a locked session, then yield them after lock release.
+        """Stream chunks via a producer-consumer queue for true progressive delivery.
 
-        The lock covers all SDK I/O and session persistence. Telegram delivery happens
-        outside the lock so a multi-chunk response doesn't block concurrent messages.
+        The producer acquires the lock, streams SDK messages into the queue, saves
+        sessions, and releases the lock — all without yielding to the caller. The
+        consumer reads from the queue and delivers to Telegram outside the lock, so
+        Telegram network latency never extends the lock-hold duration.
         """
         from claude_agent_sdk import ResultMessage
 
+        queue: asyncio.Queue[StreamChunk | None] = asyncio.Queue()
         lock = self._get_lock(chat_id)
-        chunks: list[StreamChunk] = []
 
-        async with lock:
-            if chat_id in self._pending_override_reset and chat_id in self._clients:
-                await self._close_client(chat_id)
-                self._pending_override_reset.discard(chat_id)
+        async def _produce() -> None:
+            async with lock:
+                if chat_id in self._pending_override_reset and chat_id in self._clients:
+                    await self._close_client(chat_id)
+                    self._pending_override_reset.discard(chat_id)
 
-            logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
-            t0 = time.monotonic()
+                logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
+                t0 = time.monotonic()
 
-            token = _current_chat_id.set(chat_id)
-            try:
-                client = await self._get_or_create_client(chat_id)
-                await client.query(message)
+                token = _current_chat_id.set(chat_id)
+                try:
+                    client = await self._get_or_create_client(chat_id)
+                    await client.query(message)
+                    async for msg in client.receive_response():
+                        self._log_sdk_message(msg)
+                        if isinstance(msg, ResultMessage) and msg.session_id:
+                            self._sessions[chat_id] = {
+                                "chat_id": chat_id,
+                                "session_id": msg.session_id,
+                            }
+                            logger.debug("Session updated for chat_id=%d", chat_id)
+                        for chunk in _yield_msg_chunks(
+                            msg, self._config.tool_verbosity, self._config.show_thinking
+                        ):
+                            await queue.put(chunk)
+                finally:
+                    _current_chat_id.reset(token)
 
-                async for msg in client.receive_response():
-                    self._log_sdk_message(msg)
-                    if isinstance(msg, ResultMessage) and msg.session_id:
-                        self._sessions[chat_id] = {
-                            "chat_id": chat_id,
-                            "session_id": msg.session_id,
-                        }
-                        logger.debug("Session updated for chat_id=%d", chat_id)
-                    chunks.extend(
-                        _yield_msg_chunks(msg, self._config.tool_verbosity, self._config.show_thinking)
-                    )
-            finally:
-                _current_chat_id.reset(token)
+                # Save inside the lock before releasing — GeneratorExit thrown at a
+                # yield below (after the sentinel) cannot skip this.
+                self._save_sessions()
 
-            # Save inside the lock so GeneratorExit during yielding (below) can't skip it.
-            self._save_sessions()
+            elapsed = time.monotonic() - t0
+            logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
+            await queue.put(None)  # sentinel; lock is already released at this point
 
-        elapsed = time.monotonic() - t0
-        logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
-
-        for chunk in chunks:
-            yield chunk
+        task = asyncio.create_task(_produce())
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    break
+                yield chunk  # Telegram delivery happens here, outside the lock
+        except BaseException:
+            task.cancel()
+            raise
 
     # ------------------------------------------------------------------ #
     # Reset / Close
