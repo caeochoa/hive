@@ -457,40 +457,44 @@ class ClaudeAgentRunner(AgentRunner):
         lock = self._get_lock(chat_id)
 
         async def _produce() -> None:
-            async with lock:
-                if chat_id in self._pending_override_reset and chat_id in self._clients:
-                    await self._close_client(chat_id)
-                    self._pending_override_reset.discard(chat_id)
+            try:
+                async with lock:
+                    if chat_id in self._pending_override_reset and chat_id in self._clients:
+                        await self._close_client(chat_id)
+                        self._pending_override_reset.discard(chat_id)
 
-                logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
-                t0 = time.monotonic()
+                    logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
+                    t0 = time.monotonic()
 
-                token = _current_chat_id.set(chat_id)
-                try:
-                    client = await self._get_or_create_client(chat_id)
-                    await client.query(message)
-                    async for msg in client.receive_response():
-                        self._log_sdk_message(msg)
-                        if isinstance(msg, ResultMessage) and msg.session_id:
-                            self._sessions[chat_id] = {
-                                "chat_id": chat_id,
-                                "session_id": msg.session_id,
-                            }
-                            logger.debug("Session updated for chat_id=%d", chat_id)
-                        for chunk in _yield_msg_chunks(
-                            msg, self._config.tool_verbosity, self._config.show_thinking
-                        ):
-                            await queue.put(chunk)
-                finally:
-                    _current_chat_id.reset(token)
+                    token = _current_chat_id.set(chat_id)
+                    try:
+                        client = await self._get_or_create_client(chat_id)
+                        await client.query(message)
+                        async for msg in client.receive_response():
+                            self._log_sdk_message(msg)
+                            if isinstance(msg, ResultMessage) and msg.session_id:
+                                self._sessions[chat_id] = {
+                                    "chat_id": chat_id,
+                                    "session_id": msg.session_id,
+                                }
+                                logger.debug("Session updated for chat_id=%d", chat_id)
+                            for chunk in _yield_msg_chunks(
+                                msg, self._config.tool_verbosity, self._config.show_thinking
+                            ):
+                                await queue.put(chunk)
+                    finally:
+                        _current_chat_id.reset(token)
 
-                # Save inside the lock before releasing — GeneratorExit thrown at a
-                # yield below (after the sentinel) cannot skip this.
-                self._save_sessions()
+                    # Save inside the lock before releasing — GeneratorExit thrown at a
+                    # yield below (after the sentinel) cannot skip this.
+                    self._save_sessions()
 
-            elapsed = time.monotonic() - t0
-            logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
-            await queue.put(None)  # sentinel; lock is already released at this point
+                elapsed = time.monotonic() - t0
+                logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
+            finally:
+                # Always unblock the consumer, even on SDK error or cancellation.
+                # put_nowait is safe: the queue is unbounded and never raises QueueFull.
+                queue.put_nowait(None)
 
         task = asyncio.create_task(_produce())
         try:
@@ -502,6 +506,7 @@ class ClaudeAgentRunner(AgentRunner):
         except BaseException:
             task.cancel()
             raise
+        await task  # re-raise any exception _produce() stored (no-op on success)
 
     # ------------------------------------------------------------------ #
     # Reset / Close

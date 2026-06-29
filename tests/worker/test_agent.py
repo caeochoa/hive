@@ -1306,3 +1306,40 @@ async def test_stream_one_shot_preserves_block_order(agent_config, commands_mcp,
     assert len(chunks) == 2
     assert chunks[0] == StreamChunk("I'll look that up")
     assert chunks[1] == StreamChunk("🔧 Read")
+
+
+# ------------------------------------------------------------------ #
+# _stream_interactive — producer exception unblocks consumer
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_stream_interactive_raises_on_sdk_error(runner, worker_dir):
+    """SDK exception during receive_response() must propagate, not hang forever."""
+    DummyMsg = type("DummyMsg", (), {})
+
+    async def mock_receive():
+        raise RuntimeError("network error")
+        yield  # make it an async generator
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.receive_response = MagicMock(return_value=mock_receive())
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=mock_client),
+        AssistantMessage=DummyMsg,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=DummyMsg,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        with pytest.raises(RuntimeError, match="network error"):
+            async for _ in runner.stream("hi", chat_id=42, worker_dir=worker_dir):
+                pass
