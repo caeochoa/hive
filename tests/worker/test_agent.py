@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hive.worker.agent import AgentRunner, ClaudeAgentRunner
+from hive.worker.agent import AgentRunner, ClaudeAgentRunner, StreamChunk
 
 
 # ------------------------------------------------------------------ #
@@ -27,6 +27,8 @@ def agent_config():
         system_prompt="Test system prompt",
         max_turns=5,
         memory_dir="memory/",
+        tool_verbosity="none",
+        show_thinking=False,
     )
 
 
@@ -926,7 +928,7 @@ async def test_stream_one_shot_yields_text(runner, worker_dir):
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert chunks == ["hello from one-shot"]
+    assert chunks == [StreamChunk("hello from one-shot")]
 
 
 @pytest.mark.asyncio
@@ -963,7 +965,7 @@ async def test_stream_one_shot_joins_multiple_text_blocks(runner, worker_dir):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
     assert len(chunks) == 1
-    assert chunks[0] == "part one\npart two"
+    assert chunks[0] == StreamChunk("part one\npart two")
 
 
 @pytest.mark.asyncio
@@ -1002,7 +1004,7 @@ async def test_stream_one_shot_yields_tool_use_at_minimal(agent_config, commands
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert chunks == ["🔧 Bash"]
+    assert chunks == [StreamChunk("🔧 Bash")]
 
 
 @pytest.mark.asyncio
@@ -1081,7 +1083,7 @@ async def test_stream_one_shot_yields_tool_result_at_verbose(agent_config, comma
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert any("Output:" in c for c in chunks)
+    assert any("Output:" in c.text for c in chunks)
 
 
 @pytest.mark.asyncio
@@ -1119,7 +1121,7 @@ async def test_stream_one_shot_yields_thinking_when_enabled(agent_config, comman
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert any("<tg-spoiler>" in c for c in chunks)
+    assert any(c.is_html and "<tg-spoiler>" in c.text for c in chunks)
 
 
 # ------------------------------------------------------------------ #
@@ -1171,7 +1173,7 @@ async def test_stream_interactive_yields_text(runner, worker_dir, sessions_file)
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hi", chat_id=99, worker_dir=worker_dir)]
 
-    assert chunks == ["interactive reply"]
+    assert chunks == [StreamChunk("interactive reply")]
     assert runner._sessions[99]["session_id"] == "sess-new"
 
 
@@ -1181,8 +1183,8 @@ async def test_stream_interactive_yields_text(runner, worker_dir, sessions_file)
 
 
 @pytest.mark.asyncio
-async def test_run_accumulates_stream_with_separator(runner, worker_dir):
-    """run() collects stream() chunks and joins them with \n---\n."""
+async def test_run_accumulates_stream_chunks(runner, worker_dir):
+    """run() collects non-HTML stream() chunks and joins them with newline."""
     TextBlock = type("TextBlock", (), {})
     AssistantMessage = type("AssistantMessage", (), {})
     DummyMsg = type("DummyMsg", (), {})
@@ -1217,4 +1219,90 @@ async def test_run_accumulates_stream_with_separator(runner, worker_dir):
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         result = await runner.run("hello", chat_id=None, worker_dir=worker_dir)
 
-    assert result == "first\n---\nsecond"
+    assert result == "first\nsecond"
+
+
+@pytest.mark.asyncio
+async def test_run_excludes_html_chunks(agent_config, commands_mcp, sessions_file, worker_dir):
+    """run() skips is_html=True chunks (thinking blocks) from its return value."""
+    agent_config.tool_verbosity = "none"
+    agent_config.show_thinking = True
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ThinkingBlock = type("ThinkingBlock", (), {})
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    think = ThinkingBlock()
+    think.thinking = "internal reasoning"
+    tb = TextBlock()
+    tb.text = "answer"
+    am = AssistantMessage()
+    am.content = [think, tb]
+
+    async def mock_query(**kwargs):
+        yield am
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=ThinkingBlock,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        result = await runner.run("hello", chat_id=None, worker_dir=worker_dir)
+
+    assert result == "answer"
+    assert "<tg-spoiler>" not in result
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_preserves_block_order(agent_config, commands_mcp, sessions_file, worker_dir):
+    """TextBlock before ToolUseBlock is yielded before the tool notification."""
+    agent_config.tool_verbosity = "minimal"
+    agent_config.show_thinking = False
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    TextBlock = type("TextBlock", (), {})
+    ToolUseBlock = type("ToolUseBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tb = TextBlock()
+    tb.text = "I'll look that up"
+    tub = ToolUseBlock()
+    tub.name = "Read"
+    tub.input = {"file_path": "/tmp/x"}
+    am = AssistantMessage()
+    am.content = [tb, tub]
+
+    async def mock_query(**kwargs):
+        yield am
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=ToolUseBlock,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert len(chunks) == 2
+    assert chunks[0] == StreamChunk("I'll look that up")
+    assert chunks[1] == StreamChunk("🔧 Read")

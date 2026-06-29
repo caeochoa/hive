@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,8 @@ def build_tui_session(config: WorkerConfig) -> _TuiSession:
         max_turns=config.agent_max_turns,
         memory_dir=config.agent_memory_dir,
         thinking_budget_tokens=config.agent_thinking_budget_tokens,
+        tool_verbosity=config.agent_tool_verbosity,
+        show_thinking=config.agent_show_thinking,
     )
     sessions_file = config.worker_dir / config.agent_memory_dir / ".sessions.json"
     agent = ClaudeAgentRunner(
@@ -305,9 +308,14 @@ async def _run_tui_loop(session: _TuiSession) -> None:
         else:
             before = _snapshot_paths(config.worker_dir)
             try:
-                with console.status("[dim]Thinking...[/dim]"):
-                    response = await session.agent.run(line, TUI_CHAT_ID, config.worker_dir)
-                _print_response(console, response)
+                async for chunk in session.agent.stream(line, TUI_CHAT_ID, config.worker_dir):
+                    if chunk.is_html:
+                        # Thinking spoilers: strip Telegram HTML tags for terminal display.
+                        plain = re.sub(r"<[^>]+>", "", chunk.text).strip()
+                        if plain:
+                            console.print(f"[dim]{plain}[/dim]")
+                    else:
+                        _print_response(console, chunk.text)
                 after = _snapshot_paths(config.worker_dir)
                 if _detect_changes(before, after):
                     console.print(

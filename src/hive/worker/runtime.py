@@ -245,13 +245,7 @@ class WorkerRuntime:
                     chat_id,
                     self._config.worker_dir,
                 ):
-                    # Spoiler chunks are already valid Telegram HTML — skip markdown conversion.
-                    # All other chunks are markdown and need md_to_telegram_html applied.
-                    # (md_to_telegram_html uses escape=True which would corrupt the <tg-spoiler> tag.)
-                    if chunk.startswith("<tg-spoiler>"):
-                        html = chunk
-                    else:
-                        html = md_to_telegram_html(chunk)
+                    html = chunk.text if chunk.is_html else md_to_telegram_html(chunk.text)
                     await send_long_message((context.bot, chat_id), html, parse_mode="HTML")
 
             # Snapshot is taken inside try so that any Telegram send failure during

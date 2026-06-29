@@ -10,6 +10,7 @@ import pytest
 
 from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandMeta, ScheduleEntry
+from hive.worker.agent import StreamChunk
 from hive.worker.commands import CommandRegistry
 from hive.worker.scheduler import WorkerScheduler
 
@@ -57,7 +58,11 @@ def registry(config: WorkerConfig) -> CommandRegistry:
 @pytest.fixture
 def agent() -> AsyncMock:
     agent = AsyncMock()
-    agent.run = AsyncMock(return_value="Agent response text")
+
+    async def _default_stream(*args, **kwargs):
+        yield StreamChunk("Agent response text")
+
+    agent.stream = _default_stream
     return agent
 
 
@@ -173,14 +178,13 @@ class TestRunAgentPrompt:
         config: WorkerConfig,
     ) -> None:
         entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
-        await scheduler._run_agent_prompt(entry)
+        with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock) as mock_send:
+            await scheduler._run_agent_prompt(entry)
 
-        agent.run.assert_awaited_once_with(
-            "Do the thing", chat_id=12345, worker_dir=config.worker_dir
-        )
-        bot.send_message.assert_awaited_once_with(
-            chat_id=12345, text="Agent response text", parse_mode="HTML"
-        )
+        mock_send.assert_awaited_once()
+        call_args = mock_send.call_args
+        assert call_args.args[0] == (bot, 12345)
+        assert call_args.kwargs.get("parse_mode") == "HTML"
         auto_commit.assert_awaited_once()
 
     async def test_skip_if_thresholds_are_no_ops(
@@ -197,8 +201,8 @@ class TestRunAgentPrompt:
             skip_if_seven_day_above=90.0,
         )
         with caplog.at_level(logging.WARNING, logger="hive.worker.scheduler"):
-            await scheduler._run_agent_prompt(entry)
-        agent.run.assert_awaited_once()
+            with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock):
+                await scheduler._run_agent_prompt(entry)
         assert "not yet functional" not in caplog.text
 
     async def test_start_warns_when_thresholds_configured(

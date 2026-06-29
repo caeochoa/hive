@@ -8,9 +8,10 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Generator
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,12 @@ DEFAULT_SYSTEM_PROMPT = (
 
 # ContextVar set by _stream_interactive so builtin MCP tools can identify the caller.
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
+
+
+@dataclass
+class StreamChunk:
+    text: str
+    is_html: bool = False  # True = pre-rendered Telegram HTML; do NOT pass through md_to_telegram_html
 
 
 def _summarize_input(input_dict: dict) -> str:
@@ -99,15 +106,63 @@ def _format_thinking(thinking: str, show_thinking: bool) -> str | None:
     return f"<tg-spoiler>💭 Thinking: {_html.escape(thinking)}</tg-spoiler>"
 
 
+def _yield_msg_chunks(
+    msg: Any, tool_verbosity: str, show_thinking: bool
+) -> Generator[StreamChunk, None, None]:
+    """Yield StreamChunks from one SDK message, preserving authorial block order.
+
+    TextBlocks are buffered and flushed as a single chunk before any ThinkingBlock
+    or ToolUseBlock, so explanatory text always precedes tool notifications.
+    """
+    from claude_agent_sdk import (
+        AssistantMessage,
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+
+    if isinstance(msg, AssistantMessage):
+        text_parts: list[str] = []
+        for block in msg.content:
+            if isinstance(block, ThinkingBlock):
+                if text_parts:
+                    yield StreamChunk("\n".join(text_parts))
+                    text_parts = []
+                text = _format_thinking(block.thinking, show_thinking)
+                if text:
+                    yield StreamChunk(text, is_html=True)
+            elif isinstance(block, TextBlock):
+                text_parts.append(block.text)
+            elif isinstance(block, ToolUseBlock):
+                if text_parts:
+                    yield StreamChunk("\n".join(text_parts))
+                    text_parts = []
+                text = _format_tool_use(block.name, block.input, tool_verbosity)
+                if text:
+                    yield StreamChunk(text)
+        if text_parts:
+            yield StreamChunk("\n".join(text_parts))
+    elif isinstance(msg, UserMessage):
+        for block in msg.content:
+            if isinstance(block, ToolResultBlock):
+                text = _format_tool_result(block.content, block.is_error, tool_verbosity)
+                if text:
+                    yield StreamChunk(text)
+
+
 class AgentRunner(ABC):
     """Abstract base class for agent runners."""
 
     @abstractmethod
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
-        """Run the agent with a message and return the response."""
+        """Run the agent with a message and return the text response."""
 
     @abstractmethod
-    async def stream(self, message: str, chat_id: int | None, worker_dir: Path) -> AsyncIterator[str]:
+    async def stream(
+        self, message: str, chat_id: int | None, worker_dir: Path
+    ) -> AsyncIterator[StreamChunk]:
         """Stream agent response chunks as they arrive."""
 
     @abstractmethod
@@ -333,20 +388,21 @@ class ClaudeAgentRunner(AgentRunner):
     # ------------------------------------------------------------------ #
 
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
-        """Run the agent and return the full response as a single string.
+        """Run the agent and return the text response as a single string.
 
-        Accumulates all chunks from stream() joined with '\n---\n'.
-        Use stream() directly for real-time delivery.
+        Collects only non-HTML chunks (skips thinking spoilers and tool notifications).
+        Use stream() directly for full chunk delivery to Telegram.
         """
         parts: list[str] = []
         async for chunk in self.stream(message, chat_id, worker_dir):
-            parts.append(chunk)
-        return "\n---\n".join(parts)
+            if not chunk.is_html:
+                parts.append(chunk.text)
+        return "\n".join(parts)
 
     async def stream(
         self, message: str, chat_id: int | None, worker_dir: Path
-    ) -> AsyncIterator[str]:
-        """Yield formatted chunks as the agent works (text, tool notifications, thinking)."""
+    ) -> AsyncIterator[StreamChunk]:
+        """Yield StreamChunks as the agent works (text, tool notifications, thinking)."""
         if chat_id is None:
             async for chunk in self._stream_one_shot(message):
                 yield chunk
@@ -354,22 +410,11 @@ class ClaudeAgentRunner(AgentRunner):
             async for chunk in self._stream_interactive(message, chat_id):
                 yield chunk
 
-    async def _stream_one_shot(self, message: str) -> AsyncIterator[str]:
+    async def _stream_one_shot(self, message: str) -> AsyncIterator[StreamChunk]:
         """Yield chunks for a one-shot prompt with a disposable client."""
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            TextBlock,
-            ThinkingBlock,
-            ToolResultBlock,
-            ToolUseBlock,
-            UserMessage,
-            query,
-        )
+        from claude_agent_sdk import ClaudeAgentOptions, query
 
         thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
-        tool_verbosity = getattr(self._config, "tool_verbosity", "none")
-        show_thinking = getattr(self._config, "show_thinking", False)
 
         options = ClaudeAgentOptions(
             system_prompt=getattr(
@@ -392,47 +437,23 @@ class ClaudeAgentRunner(AgentRunner):
 
         async for msg in query(prompt=message, options=options):
             self._log_sdk_message(msg)
-            if isinstance(msg, AssistantMessage):
-                text_parts: list[str] = []
-                for block in msg.content:
-                    if isinstance(block, ThinkingBlock):
-                        chunk = _format_thinking(block.thinking, show_thinking)
-                        if chunk:
-                            yield chunk
-                    elif isinstance(block, TextBlock):
-                        text_parts.append(block.text)
-                    elif isinstance(block, ToolUseBlock):
-                        chunk = _format_tool_use(block.name, block.input, tool_verbosity)
-                        if chunk:
-                            yield chunk
-                if text_parts:
-                    yield "\n".join(text_parts)
-            elif isinstance(msg, UserMessage):
-                for block in msg.content:
-                    if isinstance(block, ToolResultBlock):
-                        chunk = _format_tool_result(block.content, block.is_error, tool_verbosity)
-                        if chunk:
-                            yield chunk
+            for chunk in _yield_msg_chunks(msg, self._config.tool_verbosity, self._config.show_thinking):
+                yield chunk
 
         elapsed = time.monotonic() - t0
         logger.info("Agent one-shot complete in %.1fs", elapsed)
 
-    async def _stream_interactive(self, message: str, chat_id: int) -> AsyncIterator[str]:
-        """Yield chunks within a persistent, locked session."""
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ResultMessage,
-            TextBlock,
-            ThinkingBlock,
-            ToolResultBlock,
-            ToolUseBlock,
-            UserMessage,
-        )
+    async def _stream_interactive(self, message: str, chat_id: int) -> AsyncIterator[StreamChunk]:
+        """Collect chunks within a locked session, then yield them after lock release.
 
-        tool_verbosity = getattr(self._config, "tool_verbosity", "none")
-        show_thinking = getattr(self._config, "show_thinking", False)
+        The lock covers all SDK I/O and session persistence. Telegram delivery happens
+        outside the lock so a multi-chunk response doesn't block concurrent messages.
+        """
+        from claude_agent_sdk import ResultMessage
 
         lock = self._get_lock(chat_id)
+        chunks: list[StreamChunk] = []
+
         async with lock:
             if chat_id in self._pending_override_reset and chat_id in self._clients:
                 await self._close_client(chat_id)
@@ -448,42 +469,26 @@ class ClaudeAgentRunner(AgentRunner):
 
                 async for msg in client.receive_response():
                     self._log_sdk_message(msg)
-                    if isinstance(msg, AssistantMessage):
-                        text_parts: list[str] = []
-                        for block in msg.content:
-                            if isinstance(block, ThinkingBlock):
-                                chunk = _format_thinking(block.thinking, show_thinking)
-                                if chunk:
-                                    yield chunk
-                            elif isinstance(block, TextBlock):
-                                text_parts.append(block.text)
-                            elif isinstance(block, ToolUseBlock):
-                                chunk = _format_tool_use(block.name, block.input, tool_verbosity)
-                                if chunk:
-                                    yield chunk
-                        if text_parts:
-                            yield "\n".join(text_parts)
-                    elif isinstance(msg, UserMessage):
-                        for block in msg.content:
-                            if isinstance(block, ToolResultBlock):
-                                chunk = _format_tool_result(
-                                    block.content, block.is_error, tool_verbosity
-                                )
-                                if chunk:
-                                    yield chunk
-                    elif isinstance(msg, ResultMessage):
-                        if msg.session_id:
-                            self._sessions[chat_id] = {
-                                "chat_id": chat_id,
-                                "session_id": msg.session_id,
-                            }
-                            logger.debug("Session updated for chat_id=%d", chat_id)
+                    if isinstance(msg, ResultMessage) and msg.session_id:
+                        self._sessions[chat_id] = {
+                            "chat_id": chat_id,
+                            "session_id": msg.session_id,
+                        }
+                        logger.debug("Session updated for chat_id=%d", chat_id)
+                    chunks.extend(
+                        _yield_msg_chunks(msg, self._config.tool_verbosity, self._config.show_thinking)
+                    )
             finally:
                 _current_chat_id.reset(token)
 
-            elapsed = time.monotonic() - t0
-            logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
+            # Save inside the lock so GeneratorExit during yielding (below) can't skip it.
             self._save_sessions()
+
+        elapsed = time.monotonic() - t0
+        logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
+
+        for chunk in chunks:
+            yield chunk
 
     # ------------------------------------------------------------------ #
     # Reset / Close

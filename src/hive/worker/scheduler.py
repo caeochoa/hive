@@ -121,17 +121,16 @@ class WorkerScheduler:
 
         try:
             for user_id in self._allowed_user_ids:
-                response = await self._agent.run(
+                chunk_count = 0
+                async for chunk in self._agent.stream(
                     prompt, chat_id=user_id, worker_dir=self._config.worker_dir
-                )
+                ):
+                    text = chunk.text if chunk.is_html else md_to_telegram_html(chunk.text)
+                    await send_long_message((self._bot, user_id), text, parse_mode="HTML")
+                    chunk_count += 1
                 logger.info(
-                    "Scheduled agent prompt complete for user %d: %d chars",
-                    user_id, len(response),
-                )
-                await send_long_message(
-                    (self._bot, user_id),
-                    md_to_telegram_html(response),
-                    parse_mode="HTML",
+                    "Scheduled agent prompt complete for user %d: %d chunks",
+                    user_id, chunk_count,
                 )
         finally:
             await self._auto_commit("scheduled agent prompt")

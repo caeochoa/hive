@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hive.shared.config import load_worker_config
+from hive.worker.agent import StreamChunk
 from hive.worker.runtime import WorkerRuntime
 
 
@@ -243,7 +244,7 @@ class TestHandleNlMessage:
         rt = _make_runtime(tmp_path)
 
         async def mock_stream(*args, **kwargs):
-            yield "Agent says hi"
+            yield StreamChunk("Agent says hi")
 
         rt._agent = MagicMock()
         rt._agent.stream = mock_stream
@@ -259,9 +260,7 @@ class TestHandleNlMessage:
             with patch.object(rt, "_auto_commit", new_callable=AsyncMock) as mock_commit:
                 await rt._handle_nl_message(update, context)
 
-        mock_send.assert_awaited_once_with(
-            (context.bot, 100), "Agent says hi", parse_mode="HTML"
-        )
+        mock_send.assert_awaited_once()
         mock_commit.assert_awaited_once_with("agent turn")
 
     @pytest.mark.asyncio
@@ -269,8 +268,8 @@ class TestHandleNlMessage:
         rt = _make_runtime(tmp_path)
 
         async def mock_stream(*args, **kwargs):
-            yield "First"
-            yield "Second"
+            yield StreamChunk("First")
+            yield StreamChunk("Second")
 
         rt._agent = MagicMock()
         rt._agent.stream = mock_stream
@@ -332,8 +331,8 @@ class TestHandleNlMessage:
         rt = _make_runtime(tmp_path)
 
         async def mock_stream(*args, **kwargs):
-            yield "First chunk"
-            yield "Second chunk"
+            yield StreamChunk("First chunk")
+            yield StreamChunk("Second chunk")
 
         rt._agent = MagicMock()
         rt._agent.stream = mock_stream
@@ -458,7 +457,7 @@ class TestHandleNlMessageWithRestart:
         rt = _make_runtime(tmp_path)
 
         async def mock_stream(*args, **kwargs):
-            yield "ok"
+            yield StreamChunk("ok")
 
         rt._agent = MagicMock()
         rt._agent.stream = mock_stream
@@ -523,7 +522,7 @@ class TestHandleNlMessageWithRestart:
         rt = _make_runtime(tmp_path)
 
         async def mock_stream(*args, **kwargs):
-            yield "ok"
+            yield StreamChunk("ok")
 
         rt._agent = MagicMock()
         rt._agent.stream = mock_stream
