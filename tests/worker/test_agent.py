@@ -1004,7 +1004,7 @@ async def test_stream_one_shot_yields_tool_use_at_minimal(agent_config, commands
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert chunks == [StreamChunk("🔧 Bash")]
+    assert chunks == [StreamChunk("🔧 Bash", is_tool=True)]
 
 
 @pytest.mark.asyncio
@@ -1184,7 +1184,7 @@ async def test_stream_interactive_yields_text(runner, worker_dir, sessions_file)
 
 @pytest.mark.asyncio
 async def test_run_accumulates_stream_chunks(runner, worker_dir):
-    """run() collects non-HTML stream() chunks and joins them with newline."""
+    """run() collects text-only stream() chunks and joins them without separator."""
     TextBlock = type("TextBlock", (), {})
     AssistantMessage = type("AssistantMessage", (), {})
     DummyMsg = type("DummyMsg", (), {})
@@ -1219,7 +1219,7 @@ async def test_run_accumulates_stream_chunks(runner, worker_dir):
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         result = await runner.run("hello", chat_id=None, worker_dir=worker_dir)
 
-    assert result == "first\nsecond"
+    assert result == "firstsecond"
 
 
 @pytest.mark.asyncio
@@ -1305,7 +1305,7 @@ async def test_stream_one_shot_preserves_block_order(agent_config, commands_mcp,
 
     assert len(chunks) == 2
     assert chunks[0] == StreamChunk("I'll look that up")
-    assert chunks[1] == StreamChunk("🔧 Read")
+    assert chunks[1] == StreamChunk("🔧 Read", is_tool=True)
 
 
 # ------------------------------------------------------------------ #
