@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import logging
 import re
 import shlex
@@ -23,6 +24,8 @@ from hive.worker.commands import CommandError, CommandRegistry
 logger = logging.getLogger(__name__)
 
 TUI_CHAT_ID = 0  # Virtual chat ID; gives TUI its own session slot.
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 @dataclass
@@ -308,14 +311,22 @@ async def _run_tui_loop(session: _TuiSession) -> None:
         else:
             before = _snapshot_paths(config.worker_dir)
             try:
+                status = console.status("[dim]Thinking...[/dim]")
+                status.start()
+                received_first = False
                 async for chunk in session.agent.stream(line, TUI_CHAT_ID, config.worker_dir):
+                    if not received_first:
+                        status.stop()
+                        received_first = True
                     if chunk.is_html:
-                        # Thinking spoilers: strip Telegram HTML tags for terminal display.
-                        plain = re.sub(r"<[^>]+>", "", chunk.text).strip()
+                        # Strip Telegram HTML tags and unescape entities for terminal display.
+                        plain = _html.unescape(_HTML_TAG_RE.sub("", chunk.text)).strip()
                         if plain:
                             console.print(f"[dim]{plain}[/dim]")
                     else:
                         _print_response(console, chunk.text)
+                if not received_first:
+                    status.stop()
                 after = _snapshot_paths(config.worker_dir)
                 if _detect_changes(before, after):
                     console.print(

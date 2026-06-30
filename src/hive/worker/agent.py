@@ -39,6 +39,13 @@ class StreamChunk:
     text: str
     is_html: bool = False  # True = pre-rendered Telegram HTML; do NOT pass through md_to_telegram_html
 
+    def to_telegram_html(self) -> str:
+        """Return Telegram-ready HTML: pre-rendered chunks pass through; markdown is converted."""
+        if self.is_html:
+            return self.text
+        from hive.worker.utils import md_to_telegram_html
+        return md_to_telegram_html(self.text)
+
 
 def _summarize_input(input_dict: dict) -> str:
     """Return all key=value pairs of input dict, single-line, truncated to 60 chars."""
@@ -71,10 +78,17 @@ def _format_tool_result(content: Any, is_error: bool, verbosity: str) -> str | N
     if isinstance(content, str):
         content_str = content
     elif isinstance(content, list):
-        content_str = "\n".join(
-            c.get("text", str(c)) if isinstance(c, dict) else str(c)
-            for c in content
-        )
+        # Cap at 501 chars to avoid joining megabytes before slicing to 120/500.
+        cap = 501
+        buf: list[str] = []
+        size = 0
+        for c in content:
+            piece = c.get("text", str(c)) if isinstance(c, dict) else str(c)
+            buf.append(piece)
+            size += len(piece) + 1
+            if size > cap:
+                break
+        content_str = "\n".join(buf)
     else:
         content_str = str(content) if content else ""
 
@@ -506,7 +520,8 @@ class ClaudeAgentRunner(AgentRunner):
         except BaseException:
             task.cancel()
             raise
-        await task  # re-raise any exception _produce() stored (no-op on success)
+        finally:
+            await task  # propagate any exception _produce() raised (no-op on success)
 
     # ------------------------------------------------------------------ #
     # Reset / Close

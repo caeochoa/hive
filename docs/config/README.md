@@ -192,7 +192,7 @@ max_turns = 10
 # tool_verbosity = "moderate"    # none | minimal | moderate | detailed | verbose
 
 # Optional: send thinking blocks as Telegram spoilers.
-# show_thinking = false          # send thinking blocks as Telegram spoilers
+# show_thinking = false          # suppress thinking blocks (set true to send as Telegram spoilers)
 
 # ── Scheduled tasks ────────────────────────────────────────────────────────────
 

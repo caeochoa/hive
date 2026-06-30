@@ -30,7 +30,7 @@ from hive.worker.builtins import (
     make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
-from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
+from hive.worker.utils import send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
 
@@ -245,8 +245,7 @@ class WorkerRuntime:
                     chat_id,
                     self._config.worker_dir,
                 ):
-                    html = chunk.text if chunk.is_html else md_to_telegram_html(chunk.text)
-                    await send_long_message((context.bot, chat_id), html, parse_mode="HTML")
+                    await send_long_message((context.bot, chat_id), chunk.to_telegram_html(), parse_mode="HTML")
 
             # Snapshot is taken inside try so that any Telegram send failure during
             # the stream aborts restart detection — we don't restart if we couldn't
