@@ -521,7 +521,10 @@ class ClaudeAgentRunner(AgentRunner):
             task.cancel()
             raise
         finally:
-            await task  # propagate any exception _produce() raised (no-op on success)
+            try:
+                await task  # propagate any exception _produce() raised (no-op on success)
+            except asyncio.CancelledError:
+                pass  # expected when we cancelled the task above; don't replace the consumer's exception
 
     # ------------------------------------------------------------------ #
     # Reset / Close
