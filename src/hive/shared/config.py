@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from dotenv import dotenv_values
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ class WorkerConfig(BaseModel):
     agent_max_turns: int = 10
     agent_system_prompt: str | None = None
     agent_thinking_budget_tokens: int | None = None
-    agent_tool_verbosity: str = "none"
+    agent_tool_verbosity: Literal["none", "minimal", "moderate", "detailed", "verbose"] = "none"
     agent_show_thinking: bool = False
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []

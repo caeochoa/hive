@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import html as _html
 import logging
-import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,8 +22,6 @@ from hive.worker.commands import CommandError, CommandRegistry
 logger = logging.getLogger(__name__)
 
 TUI_CHAT_ID = 0  # Virtual chat ID; gives TUI its own session slot.
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 @dataclass
@@ -319,8 +315,7 @@ async def _run_tui_loop(session: _TuiSession) -> None:
                         status.stop()
                         received_first = True
                     if chunk.is_html:
-                        # Strip Telegram HTML tags and unescape entities for terminal display.
-                        plain = _html.unescape(_HTML_TAG_RE.sub("", chunk.text)).strip()
+                        plain = chunk.to_plain_text().strip()
                         if plain:
                             console.print(f"[dim]{plain}[/dim]")
                     else:
@@ -334,6 +329,8 @@ async def _run_tui_loop(session: _TuiSession) -> None:
                         "Run [bold]hive restart <path>[/bold] to apply changes."
                     )
             except Exception as exc:
+                if not received_first:
+                    status.stop()
                 logger.debug("Agent error traceback", exc_info=True)
                 console.print(f"[red]Agent error:[/red] {exc}")
 

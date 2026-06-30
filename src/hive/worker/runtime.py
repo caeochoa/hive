@@ -240,12 +240,17 @@ class WorkerRuntime:
 
         try:
             async with typing_action(context.bot, chat_id):
+                first_chunk = True
                 async for chunk in self._agent.stream(
                     update.message.text,
                     chat_id,
                     self._config.worker_dir,
                 ):
-                    await send_long_message((context.bot, chat_id), chunk.to_telegram_html(), parse_mode="HTML")
+                    # First chunk replies to the user's message (preserves threading in groups).
+                    # Subsequent chunks are sent as standalone messages to avoid multiple reply heads.
+                    target = update.message if first_chunk else (context.bot, chat_id)
+                    first_chunk = False
+                    await send_long_message(target, chunk.to_telegram_html(), parse_mode="HTML")
 
             # Snapshot is taken inside try so that any Telegram send failure during
             # the stream aborts restart detection — we don't restart if we couldn't

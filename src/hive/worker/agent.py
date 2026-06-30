@@ -38,6 +38,7 @@ _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", defaul
 class StreamChunk:
     text: str
     is_html: bool = False  # True = pre-rendered Telegram HTML; do NOT pass through md_to_telegram_html
+    is_tool: bool = False  # True = tool notification; excluded from run() accumulation
 
     def to_telegram_html(self) -> str:
         """Return Telegram-ready HTML: pre-rendered chunks pass through; markdown is converted."""
@@ -45,6 +46,12 @@ class StreamChunk:
             return self.text
         from hive.worker.utils import md_to_telegram_html
         return md_to_telegram_html(self.text)
+
+    def to_plain_text(self) -> str:
+        """Return plain text for terminal display: strips HTML tags and unescapes entities."""
+        import html as _h
+        import re
+        return _h.unescape(re.sub(r"<[^>]+>", "", self.text))
 
 
 def _summarize_input(input_dict: dict) -> str:
@@ -78,12 +85,14 @@ def _format_tool_result(content: Any, is_error: bool, verbosity: str) -> str | N
     if isinstance(content, str):
         content_str = content
     elif isinstance(content, list):
-        # Cap at 501 chars to avoid joining megabytes before slicing to 120/500.
+        # Cap at 501 chars. Truncate each piece before appending so a single
+        # large item can't materialise in full before the break fires.
         cap = 501
         buf: list[str] = []
         size = 0
         for c in content:
             piece = c.get("text", str(c)) if isinstance(c, dict) else str(c)
+            piece = piece[:cap]  # bound individual item before accounting for it
             buf.append(piece)
             size += len(piece) + 1
             if size > cap:
@@ -155,7 +164,7 @@ def _yield_msg_chunks(
                     text_parts = []
                 text = _format_tool_use(block.name, block.input, tool_verbosity)
                 if text:
-                    yield StreamChunk(text)
+                    yield StreamChunk(text, is_tool=True)
         if text_parts:
             yield StreamChunk("\n".join(text_parts))
     elif isinstance(msg, UserMessage):
@@ -163,7 +172,7 @@ def _yield_msg_chunks(
             if isinstance(block, ToolResultBlock):
                 text = _format_tool_result(block.content, block.is_error, tool_verbosity)
                 if text:
-                    yield StreamChunk(text)
+                    yield StreamChunk(text, is_tool=True)
 
 
 class AgentRunner(ABC):
@@ -404,14 +413,14 @@ class ClaudeAgentRunner(AgentRunner):
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
         """Run the agent and return the text response as a single string.
 
-        Collects only non-HTML chunks (skips thinking spoilers and tool notifications).
+        Collects only text chunks (skips thinking spoilers and tool notifications).
         Use stream() directly for full chunk delivery to Telegram.
         """
         parts: list[str] = []
         async for chunk in self.stream(message, chat_id, worker_dir):
-            if not chunk.is_html:
+            if not chunk.is_html and not chunk.is_tool:
                 parts.append(chunk.text)
-        return "\n".join(parts)
+        return "".join(parts)
 
     async def stream(
         self, message: str, chat_id: int | None, worker_dir: Path
@@ -511,6 +520,7 @@ class ClaudeAgentRunner(AgentRunner):
                 queue.put_nowait(None)
 
         task = asyncio.create_task(_produce())
+        _consumer_raised = False
         try:
             while True:
                 chunk = await queue.get()
@@ -518,13 +528,17 @@ class ClaudeAgentRunner(AgentRunner):
                     break
                 yield chunk  # Telegram delivery happens here, outside the lock
         except BaseException:
+            _consumer_raised = True
             task.cancel()
             raise
         finally:
             try:
-                await task  # propagate any exception _produce() raised (no-op on success)
+                await task  # propagate producer exception when consumer succeeded; suppress when consumer raised
             except asyncio.CancelledError:
-                pass  # expected when we cancelled the task above; don't replace the consumer's exception
+                pass  # expected when we cancelled the task above
+            except Exception:
+                if not _consumer_raised:
+                    raise  # surface SDK error only when it's the sole failure
 
     # ------------------------------------------------------------------ #
     # Reset / Close
