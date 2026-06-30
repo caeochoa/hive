@@ -88,6 +88,22 @@ Trade-off: higher response quality for complex tasks, at higher cost and slower 
 
 ---
 
+## Streaming agent messages
+
+Workers can surface intermediate agent activity to Telegram as it happens:
+
+- Each AI response message is sent immediately (not held until the full turn completes)
+- Tool executions appear as Telegram messages with configurable verbosity (`none` / `minimal` / `moderate` / `detailed` / `verbose`)
+- Extended thinking blocks can be shown as spoilers
+
+```toml
+[agent]
+tool_verbosity = "moderate"   # show tool name + input as messages
+show_thinking = true          # show thinking blocks as spoilers (requires thinking_budget_tokens)
+```
+
+---
+
 ## Worker Self-Configuration
 
 The agent can modify its own `hive.toml` and `commands/*.py` files during an interactive turn. After the turn completes, Hive detects changes to these files and schedules a graceful self-restart so the new configuration takes effect automatically.

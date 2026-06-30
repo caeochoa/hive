@@ -175,6 +175,6 @@ Full reference: `docs/cli/README.md`
 | Agent SDK integration | `src/hive/worker/agent.py` | `ClaudeAgentRunner.run()` |
 | Built-in commands (/reset, /help, /menu, /set) | `src/hive/worker/builtins.py` | `make_*_handler()` functions |
 | Built-in MCP tools (set_session_config) | `src/hive/worker/builtin_tools.py` | `build_builtin_mcp_server()` |
-| Session overrides & self-config restart | `src/hive/worker/agent.py` | `set_session_override()`, `_run_interactive()` |
+| Session overrides & self-config restart | `src/hive/worker/agent.py` | `set_session_override()`, `_stream_interactive()` |
 | All Pydantic data models | `src/hive/shared/models.py` | Top of file |
 | Worker utilities (typing, formatting) | `src/hive/worker/utils.py` | `docs/guides/worker-internals.md` |

@@ -16,7 +16,7 @@ from hive.shared.config import WorkerConfig
 from hive.shared.models import ScheduleEntry
 from hive.worker.agent import AgentRunner
 from hive.worker.commands import CommandError, CommandRegistry
-from hive.worker.utils import md_to_telegram_html, send_long_message
+from hive.worker.utils import send_long_message
 
 logger = logging.getLogger(__name__)
 
@@ -121,17 +121,15 @@ class WorkerScheduler:
 
         try:
             for user_id in self._allowed_user_ids:
-                response = await self._agent.run(
+                chunk_count = 0
+                async for chunk in self._agent.stream(
                     prompt, chat_id=user_id, worker_dir=self._config.worker_dir
-                )
+                ):
+                    await send_long_message((self._bot, user_id), chunk.to_telegram_html(), parse_mode="HTML")
+                    chunk_count += 1
                 logger.info(
-                    "Scheduled agent prompt complete for user %d: %d chars",
-                    user_id, len(response),
-                )
-                await send_long_message(
-                    (self._bot, user_id),
-                    md_to_telegram_html(response),
-                    parse_mode="HTML",
+                    "Scheduled agent prompt complete for user %d: %d chunks",
+                    user_id, chunk_count,
                 )
         finally:
             await self._auto_commit("scheduled agent prompt")

@@ -30,7 +30,7 @@ from hive.worker.builtins import (
     make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
-from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
+from hive.worker.utils import send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,8 @@ class WorkerRuntime:
             max_turns=self._config.agent_max_turns,
             memory_dir=self._config.agent_memory_dir,
             thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
+            tool_verbosity=self._config.agent_tool_verbosity,    # NEW
+            show_thinking=self._config.agent_show_thinking,       # NEW
         )
         sessions_file = (
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"
@@ -238,17 +240,21 @@ class WorkerRuntime:
 
         try:
             async with typing_action(context.bot, chat_id):
-                response = await self._agent.run(
+                first_chunk = True
+                async for chunk in self._agent.stream(
                     update.message.text,
                     chat_id,
                     self._config.worker_dir,
-                )
-            await send_long_message(update.message, md_to_telegram_html(response), parse_mode="HTML")
+                ):
+                    # First chunk replies to the user's message (preserves threading in groups).
+                    # Subsequent chunks are sent as standalone messages to avoid multiple reply heads.
+                    target = update.message if first_chunk else (context.bot, chat_id)
+                    first_chunk = False
+                    await send_long_message(target, chunk.to_telegram_html(), parse_mode="HTML")
 
-            # Note: snapshot is taken inside the try block so that errors during
-            # send_long_message (e.g. Telegram network failure) also skip the restart.
-            # This is intentional: if we couldn't deliver the response, we don't know
-            # whether the agent finished cleanly, so we err on the side of no restart.
+            # Snapshot is taken inside try so that any Telegram send failure during
+            # the stream aborts restart detection — we don't restart if we couldn't
+            # confirm the agent finished cleanly.
             after = self._snapshot_worker_paths()
             if self._detect_worker_changes(before, after):
                 logger.info("Worker config files changed — scheduling restart")

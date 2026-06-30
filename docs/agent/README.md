@@ -15,6 +15,8 @@ All agent settings live under the `[agent]` section.
 | `max_turns` | int | `10` | Maximum agent turns per incoming message |
 | `system_prompt` | string | _(none)_ | Custom system prompt. If set, self-config instructions are NOT appended (see §6) |
 | `thinking_budget_tokens` | int | _(none)_ | Enable extended thinking with this token budget (see §5) |
+| `tool_verbosity` | string | `"none"` | Tool execution visibility: `none` \| `minimal` \| `moderate` \| `detailed` \| `verbose` (see §9) |
+| `show_thinking` | bool | `false` | Send extended thinking blocks as Telegram spoilers (see §9) |
 
 ```toml
 [agent]
@@ -23,6 +25,8 @@ memory_dir = "memory/"
 max_turns = 10
 # system_prompt = "You are a budget tracker assistant."
 # thinking_budget_tokens = 5000
+# tool_verbosity = "moderate"
+# show_thinking = true
 ```
 
 ---
@@ -185,3 +189,29 @@ Example log output:
 2025-03-27 10:00:02 hive.worker.agent INFO [tool_result] a1b2c3d4 → 412 chars
 2025-03-27 10:00:03 hive.worker.agent INFO [result] turns=2 cost=$0.0012 stop=end_turn
 ```
+
+---
+
+## 9. Streaming messages
+
+By default the agent sends a single Telegram message when it finishes. You can change this behaviour with two optional `[agent]` fields in `hive.toml`.
+
+### Per-message delivery
+
+Each `AssistantMessage` from the Claude Agent SDK is sent to Telegram as it arrives — users see text responses as the agent produces them rather than waiting for the full turn to complete.
+
+### Tool verbosity
+
+`tool_verbosity` controls whether tool executions appear as Telegram messages:
+
+| Level | What appears |
+|---|---|
+| `none` (default) | Tool uses are silent |
+| `minimal` | `🔧 Bash` — tool name only |
+| `moderate` | `🔧 Bash: ls -la /tmp` — name + truncated input, no result |
+| `detailed` | Name + input, then a second message with `✓ N lines` or `✗ error` |
+| `verbose` | `🔧 Name\nInput: ...`, then a second message with up to 500 chars of output or `✗ Error: ...` |
+
+### Thinking blocks
+
+When `show_thinking = true`, extended thinking blocks appear as Telegram spoiler messages (tap to reveal). Hidden by default — useful when debugging agent reasoning. Extended thinking must also be enabled via `thinking_budget_tokens` (see §5); without it, no thinking blocks are produced.

@@ -103,3 +103,35 @@ def test_tui_and_full_config_identical_with_telegram_keys(tmp_path):
     assert full.telegram_allowed_user_ids == tui.telegram_allowed_user_ids
     assert full.agent_model == tui.agent_model
     assert full.agent_max_turns == tui.agent_max_turns
+
+
+def test_tool_verbosity_defaults_to_none(tmp_path):
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_tool_verbosity == "none"
+
+
+def test_show_thinking_defaults_to_false(tmp_path):
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_show_thinking is False
+
+
+def test_tool_verbosity_from_toml(tmp_path):
+    (tmp_path / "hive.toml").write_text(
+        '[worker]\nname = "t"\n[agent]\ntool_verbosity = "verbose"\n'
+    )
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_tool_verbosity == "verbose"
+
+
+def test_show_thinking_from_toml(tmp_path):
+    (tmp_path / "hive.toml").write_text(
+        '[worker]\nname = "t"\n[agent]\nshow_thinking = true\n'
+    )
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_show_thinking is True

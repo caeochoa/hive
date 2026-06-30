@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Generator
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +30,149 @@ DEFAULT_SYSTEM_PROMPT = (
     "These overrides reset on /reset or worker restart."
 )
 
-# ContextVar set by _run_interactive so builtin MCP tools can identify the caller.
+# ContextVar set by _stream_interactive so builtin MCP tools can identify the caller.
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
+
+
+@dataclass
+class StreamChunk:
+    text: str
+    is_html: bool = False  # True = pre-rendered Telegram HTML; do NOT pass through md_to_telegram_html
+    is_tool: bool = False  # True = tool notification; excluded from run() accumulation
+
+    def to_telegram_html(self) -> str:
+        """Return Telegram-ready HTML: pre-rendered chunks pass through; markdown is converted."""
+        if self.is_html:
+            return self.text
+        from hive.worker.utils import md_to_telegram_html
+        return md_to_telegram_html(self.text)
+
+    def to_plain_text(self) -> str:
+        """Return plain text for terminal display: strips HTML tags and unescapes entities."""
+        import html as _h
+        import re
+        return _h.unescape(re.sub(r"<[^>]+>", "", self.text))
+
+
+def _summarize_input(input_dict: dict) -> str:
+    """Return all key=value pairs of input dict, single-line, truncated to 60 chars."""
+    if not input_dict:
+        return ""
+    summary = ", ".join(f"{k}={v!r}" for k, v in input_dict.items())
+    return summary[:60].replace("\n", " ")
+
+
+def _format_tool_use(name: str, input_dict: dict, verbosity: str) -> str | None:
+    """Format a tool-use notification string. Returns None when verbosity is 'none'."""
+    if verbosity == "none":
+        return None
+    if verbosity == "minimal":
+        return f"🔧 {name}"
+    if verbosity in ("moderate", "detailed"):
+        summary = _summarize_input(input_dict)
+        return f"🔧 {name}: {summary}" if summary else f"🔧 {name}"
+    if verbosity == "verbose":
+        summary = _summarize_input(input_dict)
+        return f"🔧 {name}\nInput: {summary}" if summary else f"🔧 {name}"
+    return None
+
+
+def _format_tool_result(content: Any, is_error: bool, verbosity: str) -> str | None:
+    """Format a tool-result notification string. Returns None for minimal/moderate."""
+    if verbosity not in ("detailed", "verbose"):
+        return None
+
+    if isinstance(content, str):
+        content_str = content
+    elif isinstance(content, list):
+        # Cap at 501 chars. Truncate each piece before appending so a single
+        # large item can't materialise in full before the break fires.
+        cap = 501
+        buf: list[str] = []
+        size = 0
+        for c in content:
+            piece = c.get("text", str(c)) if isinstance(c, dict) else str(c)
+            piece = piece[:cap]  # bound individual item before accounting for it
+            buf.append(piece)
+            size += len(piece) + 1
+            if size > cap:
+                break
+        content_str = "\n".join(buf)
+    else:
+        content_str = str(content) if content else ""
+
+    if verbosity == "detailed":
+        if is_error:
+            return f"✗ {content_str[:120]}"
+        lines = content_str.count("\n") + 1 if content_str else 0
+        if lines > 1:
+            return f"✓ {lines} lines"
+        return f"✓ {len(content_str)} chars"
+
+    # verbose
+    if is_error:
+        return f"✗ Error: {content_str[:500]}"
+    total = len(content_str)
+    preview = content_str[:500]
+    if total > 500:
+        return f"Output:\n{preview}\n[truncated — {total} chars total]"
+    return f"Output:\n{preview}"
+
+
+def _format_thinking(thinking: str, show_thinking: bool) -> str | None:
+    """Format a thinking block as a Telegram spoiler. Returns None when disabled.
+
+    Returns raw HTML (not markdown) — callers must NOT pass this through md_to_telegram_html.
+    """
+    if not show_thinking:
+        return None
+    return f"<tg-spoiler>💭 Thinking: {_html.escape(thinking)}</tg-spoiler>"
+
+
+def _yield_msg_chunks(
+    msg: Any, tool_verbosity: str, show_thinking: bool
+) -> Generator[StreamChunk, None, None]:
+    """Yield StreamChunks from one SDK message, preserving authorial block order.
+
+    TextBlocks are buffered and flushed as a single chunk before any ThinkingBlock
+    or ToolUseBlock, so explanatory text always precedes tool notifications.
+    """
+    from claude_agent_sdk import (
+        AssistantMessage,
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+
+    if isinstance(msg, AssistantMessage):
+        text_parts: list[str] = []
+        for block in msg.content:
+            if isinstance(block, ThinkingBlock):
+                if text_parts:
+                    yield StreamChunk("\n".join(text_parts))
+                    text_parts = []
+                text = _format_thinking(block.thinking, show_thinking)
+                if text:
+                    yield StreamChunk(text, is_html=True)
+            elif isinstance(block, TextBlock):
+                text_parts.append(block.text)
+            elif isinstance(block, ToolUseBlock):
+                if text_parts:
+                    yield StreamChunk("\n".join(text_parts))
+                    text_parts = []
+                text = _format_tool_use(block.name, block.input, tool_verbosity)
+                if text:
+                    yield StreamChunk(text, is_tool=True)
+        if text_parts:
+            yield StreamChunk("\n".join(text_parts))
+    elif isinstance(msg, UserMessage):
+        for block in msg.content:
+            if isinstance(block, ToolResultBlock):
+                text = _format_tool_result(block.content, block.is_error, tool_verbosity)
+                if text:
+                    yield StreamChunk(text, is_tool=True)
 
 
 class AgentRunner(ABC):
@@ -36,7 +180,13 @@ class AgentRunner(ABC):
 
     @abstractmethod
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
-        """Run the agent with a message and return the response."""
+        """Run the agent with a message and return the text response."""
+
+    @abstractmethod
+    async def stream(
+        self, message: str, chat_id: int | None, worker_dir: Path
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream agent response chunks as they arrive."""
 
     @abstractmethod
     async def close(self) -> None:
@@ -141,12 +291,13 @@ class ClaudeAgentRunner(AgentRunner):
                         length = sum(len(str(c)) for c in content)
                     else:
                         length = 0
+                    tool_use_id = getattr(block, "tool_use_id", "unknown")
                     if block.is_error:
                         preview = str(content)[:120] if content else ""
-                        logger.error("[tool_error] %s → %s", block.tool_use_id[:8], preview)
+                        logger.error("[tool_error] %s → %s", tool_use_id[:8], preview)
                     else:
-                        logger.info("[tool_result] %s → %d chars", block.tool_use_id[:8], length)
-                        logger.debug("[tool_result] %s full=%r", block.tool_use_id[:8], content)
+                        logger.info("[tool_result] %s → %d chars", tool_use_id[:8], length)
+                        logger.debug("[tool_result] %s full=%r", tool_use_id[:8], content)
                 elif isinstance(block, ThinkingBlock):
                     logger.info("[thinking] %d chars", len(block.thinking))
                     logger.debug("[thinking] %s", block.thinking)
@@ -260,21 +411,34 @@ class ClaudeAgentRunner(AgentRunner):
     # ------------------------------------------------------------------ #
 
     async def run(self, message: str, chat_id: int | None, worker_dir: Path) -> str:
-        """Run the agent.
+        """Run the agent and return the text response as a single string.
 
-        Two paths:
-        - chat_id is None  -> one-shot: create disposable client, run, close
-        - chat_id not None -> locked, persistent session
+        Collects only text chunks (skips thinking spoilers and tool notifications).
+        Use stream() directly for full chunk delivery to Telegram.
         """
-        if chat_id is None:
-            return await self._run_one_shot(message)
-        return await self._run_interactive(message, chat_id)
+        parts: list[str] = []
+        async for chunk in self.stream(message, chat_id, worker_dir):
+            if not chunk.is_html and not chunk.is_tool:
+                parts.append(chunk.text)
+        return "".join(parts)
 
-    async def _run_one_shot(self, message: str) -> str:
-        """Execute a one-shot prompt with a disposable client."""
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+    async def stream(
+        self, message: str, chat_id: int | None, worker_dir: Path
+    ) -> AsyncIterator[StreamChunk]:
+        """Yield StreamChunks as the agent works (text, tool notifications, thinking)."""
+        if chat_id is None:
+            async for chunk in self._stream_one_shot(message):
+                yield chunk
+        else:
+            async for chunk in self._stream_interactive(message, chat_id):
+                yield chunk
+
+    async def _stream_one_shot(self, message: str) -> AsyncIterator[StreamChunk]:
+        """Yield chunks for a one-shot prompt with a disposable client."""
+        from claude_agent_sdk import ClaudeAgentOptions, query
 
         thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
+
         options = ClaudeAgentOptions(
             system_prompt=getattr(
                 self._config,
@@ -293,61 +457,88 @@ class ClaudeAgentRunner(AgentRunner):
 
         logger.info("Agent one-shot query: %r", message[:80])
         t0 = time.monotonic()
-        parts: list[str] = []
+
         async for msg in query(prompt=message, options=options):
             self._log_sdk_message(msg)
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        parts.append(block.text)
+            for chunk in _yield_msg_chunks(msg, self._config.tool_verbosity, self._config.show_thinking):
+                yield chunk
+
         elapsed = time.monotonic() - t0
-        response = "".join(parts)
-        logger.info("Agent one-shot complete: %d chars in %.1fs", len(response), elapsed)
-        return response
+        logger.info("Agent one-shot complete in %.1fs", elapsed)
 
-    async def _run_interactive(self, message: str, chat_id: int) -> str:
-        """Execute a message within a persistent, locked session."""
-        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+    async def _stream_interactive(self, message: str, chat_id: int) -> AsyncIterator[StreamChunk]:
+        """Stream chunks via a producer-consumer queue for true progressive delivery.
 
+        The producer acquires the lock, streams SDK messages into the queue, saves
+        sessions, and releases the lock — all without yielding to the caller. The
+        consumer reads from the queue and delivers to Telegram outside the lock, so
+        Telegram network latency never extends the lock-hold duration.
+        """
+        from claude_agent_sdk import ResultMessage
+
+        queue: asyncio.Queue[StreamChunk | None] = asyncio.Queue()
         lock = self._get_lock(chat_id)
-        async with lock:
-            # If overrides changed since last turn, close the stale client so
-            # _get_or_create_client rebuilds it with the new options.
-            if chat_id in self._pending_override_reset and chat_id in self._clients:
-                await self._close_client(chat_id)
-                self._pending_override_reset.discard(chat_id)
 
-            logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
-            t0 = time.monotonic()
-
-            # Set ContextVar so builtin MCP tool handlers can identify this session.
-            token = _current_chat_id.set(chat_id)
+        async def _produce() -> None:
             try:
-                client = await self._get_or_create_client(chat_id)
-                await client.query(message)
+                async with lock:
+                    if chat_id in self._pending_override_reset and chat_id in self._clients:
+                        await self._close_client(chat_id)
+                        self._pending_override_reset.discard(chat_id)
 
-                parts: list[str] = []
-                async for msg in client.receive_response():
-                    self._log_sdk_message(msg)
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                parts.append(block.text)
-                    elif isinstance(msg, ResultMessage):
-                        if msg.session_id:
-                            self._sessions[chat_id] = {
-                                "chat_id": chat_id,
-                                "session_id": msg.session_id,
-                            }
-                            logger.debug("Session updated for chat_id=%d", chat_id)
+                    logger.info("Agent query chat_id=%d: %r", chat_id, message[:80])
+                    t0 = time.monotonic()
+
+                    token = _current_chat_id.set(chat_id)
+                    try:
+                        client = await self._get_or_create_client(chat_id)
+                        await client.query(message)
+                        async for msg in client.receive_response():
+                            self._log_sdk_message(msg)
+                            if isinstance(msg, ResultMessage) and msg.session_id:
+                                self._sessions[chat_id] = {
+                                    "chat_id": chat_id,
+                                    "session_id": msg.session_id,
+                                }
+                                logger.debug("Session updated for chat_id=%d", chat_id)
+                            for chunk in _yield_msg_chunks(
+                                msg, self._config.tool_verbosity, self._config.show_thinking
+                            ):
+                                await queue.put(chunk)
+                    finally:
+                        _current_chat_id.reset(token)
+
+                    # Save inside the lock before releasing — GeneratorExit thrown at a
+                    # yield below (after the sentinel) cannot skip this.
+                    self._save_sessions()
+
+                elapsed = time.monotonic() - t0
+                logger.info("Agent response chat_id=%d: %.1fs", chat_id, elapsed)
             finally:
-                _current_chat_id.reset(token)
+                # Always unblock the consumer, even on SDK error or cancellation.
+                # put_nowait is safe: the queue is unbounded and never raises QueueFull.
+                queue.put_nowait(None)
 
-            elapsed = time.monotonic() - t0
-            response = "".join(parts)
-            logger.info("Agent response chat_id=%d: %d chars in %.1fs", chat_id, len(response), elapsed)
-            self._save_sessions()
-            return response
+        task = asyncio.create_task(_produce())
+        _consumer_raised = False
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    break
+                yield chunk  # Telegram delivery happens here, outside the lock
+        except BaseException:
+            _consumer_raised = True
+            task.cancel()
+            raise
+        finally:
+            try:
+                await task  # propagate producer exception when consumer succeeded; suppress when consumer raised
+            except asyncio.CancelledError:
+                pass  # expected when we cancelled the task above
+            except Exception:
+                if not _consumer_raised:
+                    raise  # surface SDK error only when it's the sole failure
 
     # ------------------------------------------------------------------ #
     # Reset / Close
