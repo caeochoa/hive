@@ -7,3 +7,5 @@ dist/
 .superpowers/
 create-worker-workspace/
 docs/superpowers/
+src/hive/comb/frontend/dist/
+src/hive/comb/frontend/node_modules/

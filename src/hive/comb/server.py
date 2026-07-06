@@ -206,6 +206,99 @@ async def get_cell(name: str, i: int):
         "subtitle": subtitle, "is_markdown": is_markdown,
     })
 
+# ── New /api/ routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/workers")
+async def api_list_workers() -> JSONResponse:
+    workers = _load_workers()
+    return JSONResponse([
+        {"name": name, "theme": cfg.comb_theme, "cell_count": len(cfg.comb_cells)}
+        for name, cfg in sorted(workers.items())
+    ])
+
+
+@app.get("/api/workers/{name}")
+async def api_worker_detail(name: str) -> JSONResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404, f"Worker '{name}' not found")
+    cfg = workers[name]
+    cells = [
+        {
+            "index": i,
+            "type": cell.type,
+            "title": cell.title,
+            "slug": _title_to_slug(cell.title) if cell.type == "app" else None,
+        }
+        for i, cell in enumerate(cfg.comb_cells)
+    ]
+    return JSONResponse({"name": name, "theme": cfg.comb_theme, "cells": cells})
+
+
+@app.get("/api/workers/{name}/cells/{i}")
+async def api_get_cell(name: str, i: int) -> JSONResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404, f"Worker '{name}' not found")
+    cfg = workers[name]
+    if i < 0 or i >= len(cfg.comb_cells):
+        raise HTTPException(404, "Cell index out of range")
+    cell = cfg.comb_cells[i]
+    source = cfg.worker_dir / cell.source
+    subtitle = None
+    try:
+        if cell.type == "markdown":
+            resolved = resolve_latest_in_dir(source)
+            subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)   # raw text, not rendered HTML
+            return JSONResponse({
+                "content": content, "title": cell.title, "type": "markdown",
+                "subtitle": subtitle, "is_markdown": True,
+            })
+        elif cell.type == "file":
+            resolved = resolve_latest_in_dir(source)
+            subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)
+        elif cell.type == "metric":
+            content = render_metric_cell(source, cell.key)
+        elif cell.type == "log":
+            lines = tail_log_file(source)
+            content = "\n".join(lines)
+        elif cell.type == "status":
+            content = render_status_cell(source, cell.key)
+        elif cell.type == "table":
+            content = render_table_cell(source)
+        elif cell.type == "chart":
+            content = render_chart_cell(source, cell.key)
+        elif cell.type == "app":
+            slug = _title_to_slug(cell.title)
+            content = {"url": f"/workers/{name}/apps/{slug}"}
+        else:
+            raise HTTPException(400, f"Unknown cell type: {cell.type}")
+    except CellRenderError as e:
+        logger.error("Cell render error [worker=%s cell=%d]: %s", name, i, e)
+        raise HTTPException(500, str(e))
+    return JSONResponse({
+        "content": content, "title": cell.title, "type": cell.type,
+        "subtitle": subtitle, "is_markdown": False,
+    })
+
+
+@app.get("/api/workers/{name}/cells/{i}/stream")
+async def api_stream_cell(name: str, i: int) -> StreamingResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404)
+    cfg = workers[name]
+    if i < 0 or i >= len(cfg.comb_cells):
+        raise HTTPException(404)
+    cell = cfg.comb_cells[i]
+    if cell.type != "log":
+        raise HTTPException(400, "SSE streaming only for log cells")
+    source = cfg.worker_dir / cell.source
+    return StreamingResponse(_sse_log_generator(source), media_type="text/event-stream")
+
+
 @app.get("/workers/{name}/cells/{i}/stream")
 async def stream_cell(name: str, i: int):
     workers = _load_workers()
