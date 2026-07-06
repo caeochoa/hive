@@ -278,6 +278,9 @@ async def api_get_cell(name: str, i: int) -> JSONResponse:
     except CellRenderError as e:
         logger.error("Cell render error [worker=%s cell=%d]: %s", name, i, e)
         raise HTTPException(500, str(e))
+    except Exception:
+        logger.exception("Unexpected error rendering cell [worker=%s cell=%d]", name, i)
+        raise
     return JSONResponse({
         "content": content, "title": cell.title, "type": cell.type,
         "subtitle": subtitle, "is_markdown": False,
