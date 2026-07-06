@@ -9,6 +9,7 @@ export function useCellData(workerName: string, index: number) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval>>()
+  const loadRef = useRef<() => Promise<void>>()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -22,11 +23,16 @@ export function useCellData(workerName: string, index: number) {
     }
   }, [workerName, index])
 
+  // Keep ref in sync with the latest load callback
+  loadRef.current = load
+
   useEffect(() => {
-    load()
-    timerRef.current = setInterval(load, POLL_INTERVAL)
+    if (loadRef.current) {
+      loadRef.current()
+      timerRef.current = setInterval(() => loadRef.current?.(), POLL_INTERVAL)
+    }
     return () => clearInterval(timerRef.current)
-  }, [load])
+  }, [workerName, index])
 
   return { data, loading, error, refresh: load }
 }

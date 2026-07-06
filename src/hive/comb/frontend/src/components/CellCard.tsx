@@ -22,13 +22,13 @@ export default function CellCard({ title, subtitle, onRefresh, onExpand, childre
         <div className="flex gap-1">
           {onRefresh && (
             <button title="Refresh" onClick={onRefresh}
-                    className="rounded px-2 py-2 text-[--text-muted] text-sm hover:bg-[--btn-hover] hover:text-[--text] min-h-[44px]">
+                    className="rounded px-2 py-2 text-[--text-muted] text-sm hover:bg-[--btn-hover] hover:text-[--text] min-h-[44px] min-w-[44px]">
               ↺
             </button>
           )}
           {onExpand && (
             <button title="Expand" onClick={onExpand}
-                    className="rounded px-2 py-2 text-[--text-muted] text-sm hover:bg-[--btn-hover] hover:text-[--text] min-h-[44px]">
+                    className="rounded px-2 py-2 text-[--text-muted] text-sm hover:bg-[--btn-hover] hover:text-[--text] min-h-[44px] min-w-[44px]">
               ⤢
             </button>
           )}

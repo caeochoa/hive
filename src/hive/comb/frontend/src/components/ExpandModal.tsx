@@ -28,7 +28,7 @@ export default function ExpandModal({ isOpen, title, onClose, children }: Expand
         <div className="flex items-center justify-between border-b border-[--border] px-4 min-h-[44px]">
           <span className="font-semibold text-[--text]">{title}</span>
           <button onClick={onClose}
-                  className="text-[--text-muted] hover:text-[--text] text-xl px-3 py-2 min-h-[44px]">
+                  className="text-[--text-muted] hover:text-[--text] text-xl px-3 py-2 min-h-[44px] min-w-[44px]">
             ×
           </button>
         </div>
