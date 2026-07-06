@@ -123,16 +123,27 @@ def _mount_worker_apps() -> None:
                 )
 
 
+_frontend_dist = Path(__file__).parent / "frontend" / "dist"
+
+
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
     _mount_worker_apps()
+    if (_frontend_dist / "assets").is_dir():
+        application.mount(
+            "/assets",
+            StaticFiles(directory=str(_frontend_dist / "assets")),
+            name="assets",
+        )
     yield
 
 
 app = FastAPI(title="Hive Comb", docs_url=None, redoc_url=None, lifespan=_lifespan)
+
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 @app.get("/", response_class=HTMLResponse)
@@ -302,6 +313,25 @@ async def api_stream_cell(name: str, i: int) -> StreamingResponse:
     return StreamingResponse(_sse_log_generator(source), media_type="text/event-stream")
 
 
+# ── Worker static file serving (for HTML/JS app cells) ───────────────────────
+
+@app.get("/workers/{name}/files/{file_path:path}")
+async def worker_static_file(name: str, file_path: str):
+    from fastapi.responses import FileResponse
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404)
+    cfg = workers[name]
+    target = (cfg.worker_dir / file_path).resolve()
+    try:
+        target.relative_to(cfg.worker_dir.resolve())
+    except ValueError:
+        raise HTTPException(403, "Path escapes worker directory")
+    if not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(str(target))
+
+
 @app.get("/workers/{name}/cells/{i}/stream")
 async def stream_cell(name: str, i: int):
     workers = _load_workers()
@@ -336,6 +366,20 @@ async def _sse_log_generator(log_path: Path):
         return
     except Exception:
         logger.exception("SSE stream error for %s", log_path)
+
+# ── SPA fallback — must be last ───────────────────────────────────────────────
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    index = _frontend_dist / "index.html"
+    if not index.is_file():
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(
+            "Frontend not built. Run: hive comb start (or npm run build in src/hive/comb/frontend/)",
+            status_code=503,
+        )
+    return HTMLResponse(index.read_text())
+
 
 def serve(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn

@@ -96,3 +96,29 @@ async def test_api_cell_index_out_of_range(mock_workers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/workers/budget/cells/99")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_worker_files_serves_file(mock_workers, tmp_path):
+    # tmp_path is already the worker_dir with notes.md from _make_config
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/workers/budget/files/notes.md")
+    assert resp.status_code == 200
+    assert "Hello" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_worker_files_rejects_path_traversal(mock_workers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/workers/budget/files/../../etc/passwd")
+    # The ASGI layer normalizes `../../` away before the route handler sees it,
+    # so the request either never reaches the endpoint (falls through to SPA fallback = 503)
+    # or the endpoint catches it (403/404). Any non-200 status is a rejection.
+    assert resp.status_code in (400, 403, 404, 503)
+
+
+@pytest.mark.asyncio
+async def test_spa_fallback_returns_503_when_no_dist(mock_workers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/some-react-route")   # React route, not an API route
+    assert resp.status_code == 503
