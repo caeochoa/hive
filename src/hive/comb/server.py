@@ -126,13 +126,6 @@ _frontend_dist = Path(__file__).parent / "frontend" / "dist"
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
-    _mount_worker_apps()
-    if (_frontend_dist / "assets").is_dir():
-        application.mount(
-            "/assets",
-            StaticFiles(directory=str(_frontend_dist / "assets")),
-            name="assets",
-        )
     yield
 
 
@@ -141,6 +134,12 @@ app = FastAPI(title="Hive Comb", docs_url=None, redoc_url=None, lifespan=_lifesp
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+_assets_dir = _frontend_dist / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+_mount_worker_apps()
 
 @app.get("/workers/{name}/cells/{i}")
 async def get_cell(name: str, i: int):

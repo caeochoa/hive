@@ -7,7 +7,7 @@ interface Props { workerName: string; slug: string; theme: ThemeName; title: str
 export default function AppCell({ workerName, slug, theme, title }: Props) {
   const [height, setHeight] = useState(400)
   const accent = encodeURIComponent(THEME_ACCENT[theme] ?? '#58a6ff')
-  const src = `/workers/${encodeURIComponent(workerName)}/apps/${slug}?theme=${theme}&accent=${accent}`
+  const src = `/workers/${encodeURIComponent(workerName)}/apps/${slug}/?theme=${theme}&accent=${accent}`
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
