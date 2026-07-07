@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -23,10 +23,14 @@ describe('WorkerList', () => {
     expect(screen.getByText('3 cells')).toBeInTheDocument()
   })
 
-  it('shows loading state initially', () => {
-    vi.mocked(fetchWorkers).mockReturnValue(new Promise(() => {}))
+  it('shows loading state initially', async () => {
+    let resolve: (v: never[]) => void
+    const deferred = new Promise<never[]>(res => { resolve = res })
+    vi.mocked(fetchWorkers).mockReturnValueOnce(deferred)
     render(<MemoryRouter><WorkerList /></MemoryRouter>)
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
+    // Resolve the promise so no pending microtasks leak into subsequent tests
+    await act(async () => { resolve!([]) })
   })
 
   it('shows error when fetch fails', async () => {
