@@ -9,6 +9,11 @@ export default function WorkerList() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    document.body.dataset.theme = 'terminal-dark'
+    return () => { delete document.body.dataset.theme }
+  }, [])
+
+  useEffect(() => {
     fetchWorkers()
       .then(setWorkers)
       .catch(e => setError(e.message))
