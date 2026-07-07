@@ -19,7 +19,7 @@ export default function LogCell({ workerName, index, title, onExpand }: Props) {
       <pre className="font-mono text-xs text-[--text] bg-[--pre-bg] overflow-x-auto overflow-y-auto
                       whitespace-pre h-48 p-2 rounded">
         {lines.join('\n')}
-        <div ref={bottomRef} />
+        <span ref={bottomRef} />
       </pre>
     </CellCard>
   )

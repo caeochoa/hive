@@ -26,7 +26,7 @@ export default function AppCell({ workerName, slug, theme, title }: Props) {
           {title}
         </div>
         <a href={src} target="_blank" rel="noreferrer"
-           className="text-xs text-[--text-muted] hover:text-[--text] px-2 py-2 min-h-[44px] flex items-center"
+           className="text-xs text-[--text-muted] hover:text-[--text] px-2 py-2 min-h-[44px] min-w-[44px] flex items-center"
            title="Open in new tab">
           ↗
         </a>
