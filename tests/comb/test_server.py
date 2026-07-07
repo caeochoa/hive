@@ -44,31 +44,49 @@ def mock_workers(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_index_returns_200_and_lists_workers(mock_workers):
+async def test_index_spa_fallback(mock_workers):
+    """GET / falls through to SPA fallback; returns 503 when no dist is built."""
+    import hive.comb.server as _server
+    nonexistent = Path("/tmp/nonexistent-hive-dist-xyz")
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/")
-    assert resp.status_code == 200
-    assert "test" in resp.text
-    assert "1 worker registered" in resp.text
+    with patch.object(_server, "_frontend_dist", nonexistent):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/")
+    assert resp.status_code == 503
 
 
 @pytest.mark.asyncio
-async def test_worker_dashboard_known(mock_workers):
+async def test_api_list_workers(mock_workers):
+    """API endpoint lists registered workers."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/workers/test")
+        resp = await client.get("/api/workers")
     assert resp.status_code == 200
-    assert "Notes" in resp.text
-    assert "Count" in resp.text
-    assert "Log" in resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "test"
 
 
 @pytest.mark.asyncio
-async def test_worker_dashboard_unknown(mock_workers):
+async def test_api_worker_detail_known(mock_workers):
+    """API endpoint returns worker detail with cells."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/workers/nonexistent")
+        resp = await client.get("/api/workers/test")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "test"
+    cell_titles = [c["title"] for c in data["cells"]]
+    assert "Notes" in cell_titles
+    assert "Count" in cell_titles
+    assert "Log" in cell_titles
+
+
+@pytest.mark.asyncio
+async def test_api_worker_detail_unknown(mock_workers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/workers/nonexistent")
     assert resp.status_code == 404
 
 

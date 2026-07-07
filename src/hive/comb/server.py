@@ -8,16 +8,14 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from hive.comb.cells import (
     CellRenderError,
     render_chart_cell,
     render_file_cell,
-    render_markdown_cell,
     render_metric_cell,
     render_status_cell,
     render_table_cell,
@@ -123,38 +121,25 @@ def _mount_worker_apps() -> None:
                 )
 
 
+_frontend_dist = Path(__file__).parent / "frontend" / "dist"
+
+
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
-    _mount_worker_apps()
     yield
 
 
 app = FastAPI(title="Hive Comb", docs_url=None, redoc_url=None, lifespan=_lifespan)
+
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    workers = _load_workers()
-    return templates.TemplateResponse(request, "index.html", {"workers": sorted(workers.keys())})
+_assets_dir = _frontend_dist / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
-@app.get("/workers/{name}", response_class=HTMLResponse)
-async def worker_dashboard(request: Request, name: str):
-    workers = _load_workers()
-    if name not in workers:
-        raise HTTPException(404, f"Worker '{name}' not found")
-    cfg = workers[name]
-    cell_types = [c.type for c in cfg.comb_cells]
-    cell_slugs = [
-        _title_to_slug(c.title) if c.type == "app" else None
-        for c in cfg.comb_cells
-    ]
-    return templates.TemplateResponse(request, "worker.html", {
-        "name": name, "cells": cfg.comb_cells, "cell_types": cell_types,
-        "cell_slugs": cell_slugs, "theme": cfg.comb_theme,
-    })
+_mount_worker_apps()
 
 @app.get("/workers/{name}/cells/{i}")
 async def get_cell(name: str, i: int):
@@ -172,11 +157,9 @@ async def get_cell(name: str, i: int):
         if cell.type == "file":
             resolved = resolve_latest_in_dir(source)
             subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)
             if resolved.suffix == ".md":
-                content = render_markdown_cell(resolved)
                 is_markdown = True
-            else:
-                content = render_file_cell(resolved)
         elif cell.type == "metric":
             content = render_metric_cell(source, cell.key)
         elif cell.type == "log":
@@ -205,6 +188,121 @@ async def get_cell(name: str, i: int):
         "content": content, "title": cell.title, "type": cell.type,
         "subtitle": subtitle, "is_markdown": is_markdown,
     })
+
+# ── New /api/ routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/workers")
+async def api_list_workers() -> JSONResponse:
+    workers = _load_workers()
+    return JSONResponse([
+        {"name": name, "theme": cfg.comb_theme, "cell_count": len(cfg.comb_cells)}
+        for name, cfg in sorted(workers.items())
+    ])
+
+
+@app.get("/api/workers/{name}")
+async def api_worker_detail(name: str) -> JSONResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404, f"Worker '{name}' not found")
+    cfg = workers[name]
+    cells = [
+        {
+            "index": i,
+            "type": cell.type,
+            "title": cell.title,
+            "slug": _title_to_slug(cell.title) if cell.type == "app" else None,
+        }
+        for i, cell in enumerate(cfg.comb_cells)
+    ]
+    return JSONResponse({"name": name, "theme": cfg.comb_theme, "cells": cells})
+
+
+@app.get("/api/workers/{name}/cells/{i}")
+async def api_get_cell(name: str, i: int) -> JSONResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404, f"Worker '{name}' not found")
+    cfg = workers[name]
+    if i < 0 or i >= len(cfg.comb_cells):
+        raise HTTPException(404, "Cell index out of range")
+    cell = cfg.comb_cells[i]
+    source = cfg.worker_dir / cell.source
+    subtitle = None
+    try:
+        if cell.type == "markdown":
+            resolved = resolve_latest_in_dir(source)
+            subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)   # raw text, not rendered HTML
+            return JSONResponse({
+                "content": content, "title": cell.title, "type": "markdown",
+                "subtitle": subtitle, "is_markdown": True,
+            })
+        elif cell.type == "file":
+            resolved = resolve_latest_in_dir(source)
+            subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)
+        elif cell.type == "metric":
+            content = render_metric_cell(source, cell.key)
+        elif cell.type == "log":
+            lines = tail_log_file(source)
+            content = "\n".join(lines)
+        elif cell.type == "status":
+            content = render_status_cell(source, cell.key)
+        elif cell.type == "table":
+            content = render_table_cell(source)
+        elif cell.type == "chart":
+            content = render_chart_cell(source, cell.key)
+        elif cell.type == "app":
+            slug = _title_to_slug(cell.title)
+            content = {"url": f"/workers/{name}/apps/{slug}"}
+        else:
+            raise HTTPException(400, f"Unknown cell type: {cell.type}")
+    except CellRenderError as e:
+        logger.error("Cell render error [worker=%s cell=%d]: %s", name, i, e)
+        raise HTTPException(500, str(e))
+    except Exception:
+        logger.exception("Unexpected error rendering cell [worker=%s cell=%d]", name, i)
+        raise
+    return JSONResponse({
+        "content": content, "title": cell.title, "type": cell.type,
+        "subtitle": subtitle, "is_markdown": False,
+    })
+
+
+@app.get("/api/workers/{name}/cells/{i}/stream")
+async def api_stream_cell(name: str, i: int) -> StreamingResponse:
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404)
+    cfg = workers[name]
+    if i < 0 or i >= len(cfg.comb_cells):
+        raise HTTPException(404)
+    cell = cfg.comb_cells[i]
+    if cell.type != "log":
+        raise HTTPException(400, "SSE streaming only for log cells")
+    source = cfg.worker_dir / cell.source
+    return StreamingResponse(_sse_log_generator(source), media_type="text/event-stream")
+
+
+# ── Worker static file serving (for HTML/JS app cells) ───────────────────────
+
+@app.get("/workers/{name}/files/{file_path:path}")
+async def worker_static_file(name: str, file_path: str):
+    from fastapi.responses import FileResponse
+    workers = _load_workers()
+    if name not in workers:
+        raise HTTPException(404)
+    cfg = workers[name]
+    target = (cfg.worker_dir / file_path).resolve()
+    try:
+        target.relative_to(cfg.worker_dir.resolve())
+    except ValueError:
+        raise HTTPException(403, "Path escapes worker directory")
+    if not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(str(target))
+
 
 @app.get("/workers/{name}/cells/{i}/stream")
 async def stream_cell(name: str, i: int):
@@ -240,6 +338,20 @@ async def _sse_log_generator(log_path: Path):
         return
     except Exception:
         logger.exception("SSE stream error for %s", log_path)
+
+# ── SPA fallback — must be last ───────────────────────────────────────────────
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    index = _frontend_dist / "index.html"
+    if not index.is_file():
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(
+            "Frontend not built. Run: hive comb start (or npm run build in src/hive/comb/frontend/)",
+            status_code=503,
+        )
+    return HTMLResponse(index.read_text())
+
 
 def serve(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn
