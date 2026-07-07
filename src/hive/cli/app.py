@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import typer
@@ -326,6 +328,27 @@ comb_app = typer.Typer(help="Manage the Comb dashboard server.")
 app.add_typer(comb_app, name="comb")
 
 
+def _build_frontend(frontend_dir: Path) -> None:
+    """Build the React frontend. Raises SystemExit on failure."""
+    if not (frontend_dir / "node_modules").is_dir():
+        typer.echo("  Installing npm dependencies (first run)...")
+        result = subprocess.run(
+            ["npm", "install"], cwd=str(frontend_dir), capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            typer.echo(f"npm install failed:\n{result.stderr}", err=True)
+            raise typer.Exit(code=1)
+
+    typer.echo("Building Comb frontend...")
+    result = subprocess.run(
+        ["npm", "run", "build"], cwd=str(frontend_dir), capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        typer.echo(f"Frontend build failed:\n{result.stderr}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("  Frontend built successfully.")
+
+
 @comb_app.command("serve", hidden=True)
 def comb_serve(
     host: str = typer.Option("127.0.0.1"),
@@ -339,8 +362,14 @@ def comb_serve(
 
 @comb_app.command("start")
 def comb_start() -> None:
-    """Start the Comb dashboard server."""
+    """Start the Comb dashboard server (builds frontend first)."""
     from hive.shared.supervisor import reload_supervisord, supervisorctl
+
+    frontend_dir = Path(__file__).parent.parent / "comb" / "frontend"
+    if frontend_dir.is_dir():
+        _build_frontend(frontend_dir)
+    else:
+        typer.echo("Warning: frontend directory not found, skipping build.", err=True)
 
     reload_supervisord()
     result = supervisorctl("start", "hive-comb")
@@ -358,12 +387,67 @@ def comb_stop() -> None:
 
 @comb_app.command("restart")
 def comb_restart() -> None:
-    """Restart the Comb dashboard server."""
+    """Restart the Comb dashboard server (rebuilds frontend first)."""
     from hive.shared.supervisor import reload_supervisord, supervisorctl
+
+    frontend_dir = Path(__file__).parent.parent / "comb" / "frontend"
+    if frontend_dir.is_dir():
+        _build_frontend(frontend_dir)
+    else:
+        typer.echo("Warning: frontend directory not found, skipping build.", err=True)
 
     reload_supervisord()
     result = supervisorctl("restart", "hive-comb")
     typer.echo(result.stdout.strip() if result.stdout else "Restarted hive-comb")
+
+
+@comb_app.command("dev")
+def comb_dev(
+    api_port: int = typer.Option(8080, help="Port for the FastAPI data API"),
+    vite_port: int = typer.Option(5173, help="Port for the Vite dev server"),
+) -> None:
+    """Run Vite dev server + FastAPI for Comb frontend development."""
+    frontend_dir = Path(__file__).parent.parent / "comb" / "frontend"
+    if not frontend_dir.is_dir():
+        typer.echo(f"Frontend directory not found: {frontend_dir}", err=True)
+        raise typer.Exit(code=1)
+
+    src_dir = Path(__file__).parent.parent.parent  # hive/src/
+
+    typer.echo(f"Starting FastAPI on http://127.0.0.1:{api_port} ...")
+    api_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "hive.comb.server:app",
+         "--host", "127.0.0.1", "--port", str(api_port), "--reload"],
+        cwd=str(src_dir),
+    )
+
+    typer.echo(f"Starting Vite on http://localhost:{vite_port} ...")
+    vite_proc = subprocess.Popen(
+        ["npm", "run", "dev", "--", "--port", str(vite_port)],
+        cwd=str(frontend_dir),
+    )
+
+    typer.echo(f"\nComb dev running at http://localhost:{vite_port}")
+    typer.echo("Press Ctrl+C to stop.\n")
+
+    def _shutdown(sig: int, frame: object) -> None:
+        api_proc.terminate()
+        vite_proc.terminate()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    while True:
+        if api_proc.poll() is not None:
+            typer.echo("FastAPI exited unexpectedly.", err=True)
+            vite_proc.terminate()
+            raise typer.Exit(code=1)
+        if vite_proc.poll() is not None:
+            typer.echo("Vite exited unexpectedly.", err=True)
+            api_proc.terminate()
+            raise typer.Exit(code=1)
+        time.sleep(0.5)
 
 
 def _write_if_missing(path: Path, content: str) -> None:
