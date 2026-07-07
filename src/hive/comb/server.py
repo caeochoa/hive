@@ -8,16 +8,14 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from hive.comb.cells import (
     CellRenderError,
     render_chart_cell,
     render_file_cell,
-    render_markdown_cell,
     render_metric_cell,
     render_status_cell,
     render_table_cell,
@@ -144,29 +142,6 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    workers = _load_workers()
-    return templates.TemplateResponse(request, "index.html", {"workers": sorted(workers.keys())})
-
-@app.get("/workers/{name}", response_class=HTMLResponse)
-async def worker_dashboard(request: Request, name: str):
-    workers = _load_workers()
-    if name not in workers:
-        raise HTTPException(404, f"Worker '{name}' not found")
-    cfg = workers[name]
-    cell_types = [c.type for c in cfg.comb_cells]
-    cell_slugs = [
-        _title_to_slug(c.title) if c.type == "app" else None
-        for c in cfg.comb_cells
-    ]
-    return templates.TemplateResponse(request, "worker.html", {
-        "name": name, "cells": cfg.comb_cells, "cell_types": cell_types,
-        "cell_slugs": cell_slugs, "theme": cfg.comb_theme,
-    })
-
 @app.get("/workers/{name}/cells/{i}")
 async def get_cell(name: str, i: int):
     workers = _load_workers()
@@ -183,11 +158,9 @@ async def get_cell(name: str, i: int):
         if cell.type == "file":
             resolved = resolve_latest_in_dir(source)
             subtitle = resolved.name if resolved != source else None
+            content = render_file_cell(resolved)
             if resolved.suffix == ".md":
-                content = render_markdown_cell(resolved)
                 is_markdown = True
-            else:
-                content = render_file_cell(resolved)
         elif cell.type == "metric":
             content = render_metric_cell(source, cell.key)
         elif cell.type == "log":

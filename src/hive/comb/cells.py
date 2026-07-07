@@ -39,19 +39,6 @@ def render_file_cell(source: Path) -> str:
     return source.read_text()
 
 
-def render_markdown_cell(source: Path) -> str:
-    """Render a Markdown file as an HTML string.
-
-    Raises CellRenderError if file doesn't exist.
-    """
-    import mistune
-    content = render_file_cell(source)
-    try:
-        return mistune.html(content)
-    except Exception as e:
-        raise CellRenderError(f"Markdown render failed: {e}") from e
-
-
 def render_metric_cell(source: Path, key: str) -> str:
     """Load JSON from file, extract top-level key, return value as string.
 

@@ -112,13 +112,20 @@ async def test_worker_files_rejects_path_traversal(mock_workers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/workers/budget/files/../../etc/passwd")
     # The ASGI layer normalizes `../../` away before the route handler sees it,
-    # so the request either never reaches the endpoint (falls through to SPA fallback = 503)
-    # or the endpoint catches it (403/404). Any non-200 status is a rejection.
-    assert resp.status_code in (400, 403, 404, 503)
+    # so the request never reaches the worker_static_file handler — it falls through to
+    # the SPA fallback (200 with built dist, 503 without). Either way, /etc/passwd is
+    # never served directly: verify the response body does not contain typical passwd content.
+    assert "root:" not in resp.text
 
 
 @pytest.mark.asyncio
 async def test_spa_fallback_returns_503_when_no_dist(mock_workers):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.get("/some-react-route")   # React route, not an API route
+    """SPA fallback returns 503 when frontend dist is not built."""
+    from unittest.mock import patch as _patch
+    import hive.comb.server as _server
+    # Temporarily point _frontend_dist at a non-existent path to simulate no built dist
+    nonexistent = Path("/tmp/nonexistent-hive-dist-xyz")
+    with _patch.object(_server, "_frontend_dist", nonexistent):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/some-react-route")
     assert resp.status_code == 503
