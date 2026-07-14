@@ -29,6 +29,13 @@ class WorkerConfig(BaseModel):
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
     comb_theme: str = "terminal-dark"
+    agent_env: dict[str, str] = {}
+
+
+# .env keys forwarded to the agent subprocess. Without one of these, the agent
+# falls back to the interactive Claude Code OAuth token, which expires after 8h
+# and cannot be refreshed headlessly.
+AGENT_ENV_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 
 
 def _parse_allowed_ids(raw: str) -> list[int]:
@@ -70,7 +77,9 @@ def _build_worker_config(
     schedule_raw: list,
     comb_raw: list,
     comb_theme: str,
+    env: dict[str, str | None] | None = None,
 ) -> WorkerConfig:
+    env = env or {}
     return WorkerConfig(
         name=worker_section["name"],
         worker_dir=worker_dir,
@@ -86,6 +95,7 @@ def _build_worker_config(
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
         comb_theme=comb_theme,
+        agent_env={k: v for k in AGENT_ENV_KEYS if (v := env.get(k))},
     )
 
 
@@ -108,6 +118,7 @@ def load_worker_config_for_tui(worker_dir: Path) -> WorkerConfig:
     return _build_worker_config(
         worker_dir, token, allowed_ids,
         worker_section, agent_section, schedule_raw, comb_raw, comb_theme,
+        env=env,
     )
 
 
@@ -127,4 +138,5 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
     return _build_worker_config(
         worker_dir, token, _parse_allowed_ids(allowed_id),
         worker_section, agent_section, schedule_raw, comb_raw, comb_theme,
+        env=env,
     )

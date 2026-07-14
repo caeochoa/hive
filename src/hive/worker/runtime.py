@@ -93,6 +93,7 @@ class WorkerRuntime:
             thinking_budget_tokens=self._config.agent_thinking_budget_tokens,
             tool_verbosity=self._config.agent_tool_verbosity,    # NEW
             show_thinking=self._config.agent_show_thinking,       # NEW
+            env=self._config.agent_env,
         )
         sessions_file = (
             self._config.worker_dir / self._config.agent_memory_dir / ".sessions.json"

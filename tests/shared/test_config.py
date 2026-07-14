@@ -60,6 +60,38 @@ def test_minimal_config_with_env(tmp_path):
     assert config.agent_max_turns == 10
 
 
+def test_agent_env_empty_by_default(tmp_path):
+    """agent_env is empty when .env has no auth keys."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {}
+
+
+def test_agent_env_forwards_auth_keys_only(tmp_path):
+    """Auth keys land in agent_env; Telegram secrets do not."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=tok\n"
+        "TELEGRAM_ALLOWED_USER_ID=1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=oat-123\n"
+        "ANTHROPIC_API_KEY=sk-456\n"
+    )
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "oat-123",
+        "ANTHROPIC_API_KEY": "sk-456",
+    }
+
+
+def test_agent_env_in_tui_config(tmp_path):
+    """The TUI loader forwards auth keys too."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("CLAUDE_CODE_OAUTH_TOKEN=oat-123\n")
+    config = load_worker_config_for_tui(tmp_path)
+    assert config.agent_env == {"CLAUDE_CODE_OAUTH_TOKEN": "oat-123"}
+
+
 def test_thinking_budget_tokens_default(tmp_path):
     """agent_thinking_budget_tokens defaults to None when not set."""
     (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')

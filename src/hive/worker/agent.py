@@ -387,6 +387,9 @@ class ClaudeAgentRunner(AgentRunner):
             }
             if thinking_budget is not None:
                 base_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+            agent_env = getattr(self._config, "env", None)
+            if agent_env:
+                base_kwargs["env"] = agent_env
 
             # Merge session-specific overrides (e.g. model, max_turns).
             overrides = dict(self._session_overrides.get(chat_id, {}))
@@ -438,6 +441,7 @@ class ClaudeAgentRunner(AgentRunner):
         from claude_agent_sdk import ClaudeAgentOptions, query
 
         thinking_budget = getattr(self._config, "thinking_budget_tokens", None)
+        agent_env = getattr(self._config, "env", None)
 
         options = ClaudeAgentOptions(
             system_prompt=getattr(
@@ -453,6 +457,7 @@ class ClaudeAgentRunner(AgentRunner):
             max_turns=self._config.max_turns,
             **({"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
                if thinking_budget is not None else {}),
+            **({"env": agent_env} if agent_env else {}),
         )
 
         logger.info("Agent one-shot query: %r", message[:80])

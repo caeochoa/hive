@@ -26,6 +26,11 @@ TELEGRAM_BOT_TOKEN=
 # One user: TELEGRAM_ALLOWED_USER_ID=12345
 # Multiple users: TELEGRAM_ALLOWED_USER_ID=12345,67890
 TELEGRAM_ALLOWED_USER_ID=
+# Recommended: long-lived agent auth from `claude setup-token` (subscription-billed).
+# Without it the agent uses the interactive Claude Code OAuth token, which
+# expires after 8h and cannot be refreshed by headless workers.
+# CLAUDE_CODE_OAUTH_TOKEN=
+# Alternative (API billing): ANTHROPIC_API_KEY=
 """
 
 GITIGNORE_TEMPLATE = """\

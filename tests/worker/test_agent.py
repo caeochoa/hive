@@ -231,6 +231,126 @@ async def test_run_interactive(runner, worker_dir, sessions_file):
 
 
 # ------------------------------------------------------------------ #
+# Agent env forwarding
+# ------------------------------------------------------------------ #
+
+
+def _one_shot_sdk_mock():
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "reply"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+    return mock_sdk
+
+
+@pytest.mark.asyncio
+async def test_one_shot_forwards_agent_env(agent_config, commands_mcp, sessions_file, worker_dir):
+    """config.env is passed to ClaudeAgentOptions on the one-shot path."""
+    agent_config.env = {"CLAUDE_CODE_OAUTH_TOKEN": "oat-123"}
+    runner = ClaudeAgentRunner(
+        config=agent_config,
+        commands_mcp=commands_mcp,
+        command_names=[],
+        sessions_file=sessions_file,
+        worker_dir=worker_dir,
+    )
+    mock_sdk = _one_shot_sdk_mock()
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner.run("hello", chat_id=None, worker_dir=worker_dir)
+
+    kwargs = mock_sdk.ClaudeAgentOptions.call_args.kwargs
+    assert kwargs["env"] == {"CLAUDE_CODE_OAUTH_TOKEN": "oat-123"}
+
+
+@pytest.mark.asyncio
+async def test_one_shot_omits_env_when_unset(runner, worker_dir):
+    """Without config.env, ClaudeAgentOptions receives no env kwarg."""
+    mock_sdk = _one_shot_sdk_mock()
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner.run("hello", chat_id=None, worker_dir=worker_dir)
+
+    assert "env" not in mock_sdk.ClaudeAgentOptions.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_interactive_forwards_agent_env(agent_config, commands_mcp, sessions_file, worker_dir):
+    """config.env is passed to ClaudeAgentOptions on the interactive path."""
+    agent_config.env = {"ANTHROPIC_API_KEY": "sk-456"}
+    runner = ClaudeAgentRunner(
+        config=agent_config,
+        commands_mcp=commands_mcp,
+        command_names=[],
+        sessions_file=sessions_file,
+        worker_dir=worker_dir,
+    )
+
+    TextBlock = type("TextBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    ResultMessage = type("ResultMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    text_block = TextBlock()
+    text_block.text = "reply"
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [text_block]
+    result_msg = ResultMessage()
+    result_msg.session_id = "sid"
+    result_msg.num_turns = 1
+    result_msg.total_cost_usd = None
+    result_msg.stop_reason = "end_turn"
+    result_msg.usage = None
+
+    async def mock_receive():
+        yield assistant_msg
+        yield result_msg
+
+    mock_client_instance = AsyncMock()
+    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+    mock_client_instance.receive_response = MagicMock(return_value=mock_receive())
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(return_value=mock_client_instance),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=ResultMessage,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=DummyMsg,
+        ToolResultBlock=DummyMsg,
+        TextBlock=TextBlock,
+    )
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        await runner.run("hi", chat_id=7, worker_dir=worker_dir)
+
+    kwargs = mock_sdk.ClaudeAgentOptions.call_args.kwargs
+    assert kwargs["env"] == {"ANTHROPIC_API_KEY": "sk-456"}
+
+
+# ------------------------------------------------------------------ #
 # Reset session
 # ------------------------------------------------------------------ #
 
