@@ -285,3 +285,61 @@ class TestUpgrade:
             result = runner.invoke(app, ["upgrade"])
         assert result.exit_code == 0
         mock_write.assert_called_once_with("budget", tmp_path)
+
+
+class TestAuth:
+    def _patch_env_path(self, path):
+        return patch("hive.shared.config.GLOBAL_ENV_PATH", path)
+
+    def test_auth_writes_token(self, tmp_path):
+        env_path = tmp_path / "config" / "hive" / ".env"
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth", "--token", "oat-123"])
+        assert result.exit_code == 0
+        assert env_path.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=oat-123\n"
+        assert (env_path.stat().st_mode & 0o777) == 0o600
+
+    def test_auth_api_key_flag(self, tmp_path):
+        env_path = tmp_path / ".env"
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth", "--api-key", "--token", "sk-456"])
+        assert result.exit_code == 0
+        assert env_path.read_text() == "ANTHROPIC_API_KEY=sk-456\n"
+
+    def test_auth_replaces_existing_key_preserving_others(self, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("OTHER=keep\nCLAUDE_CODE_OAUTH_TOKEN=old\n")
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth", "--token", "new"])
+        assert result.exit_code == 0
+        assert env_path.read_text() == "OTHER=keep\nCLAUDE_CODE_OAUTH_TOKEN=new\n"
+
+    def test_auth_prompts_when_no_token(self, tmp_path):
+        env_path = tmp_path / ".env"
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth"], input="prompted-tok\n")
+        assert result.exit_code == 0
+        assert "CLAUDE_CODE_OAUTH_TOKEN=prompted-tok" in env_path.read_text()
+
+    def test_auth_rejects_empty_token(self, tmp_path):
+        env_path = tmp_path / ".env"
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth", "--token", "  "])
+        assert result.exit_code == 1
+        assert not env_path.exists()
+
+    def test_auth_status_masks_value(self, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abcdefghijklmnop\n")
+        with self._patch_env_path(env_path):
+            result = runner.invoke(app, ["auth", "--status"])
+        assert result.exit_code == 0
+        assert "sk-ant-oat01-abcdefghijklmnop" not in result.output
+        assert "sk-ant-oat01…mnop" in result.output
+        assert "ANTHROPIC_API_KEY: not set" in result.output
+
+    def test_auth_status_when_file_missing(self, tmp_path):
+        with self._patch_env_path(tmp_path / "missing.env"):
+            result = runner.invoke(app, ["auth", "--status"])
+        assert result.exit_code == 0
+        assert "CLAUDE_CODE_OAUTH_TOKEN: not set" in result.output

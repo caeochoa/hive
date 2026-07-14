@@ -37,6 +37,10 @@ class WorkerConfig(BaseModel):
 # and cannot be refreshed headlessly.
 AGENT_ENV_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 
+# Hive-level .env (written by `hive auth`). Auth keys set here apply to every
+# Worker; a Worker's own .env overrides them.
+GLOBAL_ENV_PATH = Path.home() / ".config" / "hive" / ".env"
+
 
 def _parse_allowed_ids(raw: str) -> list[int]:
     """Parse 'id1,id2,...' or a single 'id' into a list[int]."""
@@ -68,6 +72,16 @@ def _parse_worker_toml(worker_dir: Path) -> tuple[dict[str, str], dict, dict, li
     return env, worker_section, agent_section, schedule_raw, comb_raw, comb_theme
 
 
+def _resolve_agent_env(worker_env: dict[str, str | None]) -> dict[str, str]:
+    """Allowlisted auth vars for the agent subprocess: global .env, then worker .env."""
+    global_env = dotenv_values(GLOBAL_ENV_PATH) if GLOBAL_ENV_PATH.exists() else {}
+    return {
+        k: v
+        for k in AGENT_ENV_KEYS
+        if (v := worker_env.get(k) or global_env.get(k))
+    }
+
+
 def _build_worker_config(
     worker_dir: Path,
     token: str,
@@ -95,7 +109,7 @@ def _build_worker_config(
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
         comb_theme=comb_theme,
-        agent_env={k: v for k in AGENT_ENV_KEYS if (v := env.get(k))},
+        agent_env=_resolve_agent_env(env),
     )
 
 

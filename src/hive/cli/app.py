@@ -26,9 +26,9 @@ TELEGRAM_BOT_TOKEN=
 # One user: TELEGRAM_ALLOWED_USER_ID=12345
 # Multiple users: TELEGRAM_ALLOWED_USER_ID=12345,67890
 TELEGRAM_ALLOWED_USER_ID=
-# Recommended: long-lived agent auth from `claude setup-token` (subscription-billed).
-# Without it the agent uses the interactive Claude Code OAuth token, which
-# expires after 8h and cannot be refreshed by headless workers.
+# Agent auth: run `hive auth` once to set a token for all Workers globally
+# (get one with `claude setup-token`). Uncomment below only to override the
+# global token for this Worker.
 # CLAUDE_CODE_OAUTH_TOKEN=
 # Alternative (API billing): ANTHROPIC_API_KEY=
 """
@@ -325,6 +325,65 @@ def upgrade() -> None:
 
     reload_supervisord()
     typer.echo("Done. Run 'hive status' to verify.")
+
+
+def _upsert_env_var(path: Path, key: str, value: str) -> None:
+    """Set key=value in a dotenv file, replacing an existing line or appending."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text().splitlines() if path.exists() else []
+    new_line = f"{key}={value}"
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}="):
+            lines[i] = new_line
+            break
+    else:
+        lines.append(new_line)
+    path.write_text("\n".join(lines) + "\n")
+    path.chmod(0o600)
+
+
+def _mask_secret(value: str) -> str:
+    if len(value) <= 16:
+        return "****"
+    return f"{value[:12]}…{value[-4:]}"
+
+
+@app.command()
+def auth(
+    token: str = typer.Option(None, "--token", help="The token to store (prompted if omitted)"),
+    api_key: bool = typer.Option(False, "--api-key", help="Store as ANTHROPIC_API_KEY (API billing) instead of CLAUDE_CODE_OAUTH_TOKEN"),
+    status: bool = typer.Option(False, "--status", help="Show which auth keys are set globally"),
+) -> None:
+    """Store agent auth for all Workers in the global Hive .env.
+
+    Get a long-lived, subscription-billed token by running `claude setup-token`.
+    Workers can still override this in their own .env.
+    """
+    from dotenv import dotenv_values
+
+    from hive.shared.config import AGENT_ENV_KEYS, GLOBAL_ENV_PATH
+
+    if status:
+        env = dotenv_values(GLOBAL_ENV_PATH) if GLOBAL_ENV_PATH.exists() else {}
+        typer.echo(f"Global auth file: {GLOBAL_ENV_PATH}")
+        for key in AGENT_ENV_KEYS:
+            value = env.get(key)
+            typer.echo(f"  {key}: {_mask_secret(value) if value else 'not set'}")
+        return
+
+    key = "ANTHROPIC_API_KEY" if api_key else "CLAUDE_CODE_OAUTH_TOKEN"
+    if token is None:
+        typer.echo("Tip: run `claude setup-token` to mint a long-lived subscription token.")
+        token = typer.prompt(f"{key}", hide_input=True)
+    token = token.strip()
+    if not token:
+        typer.echo("Error: empty token", err=True)
+        raise typer.Exit(code=1)
+
+    _upsert_env_var(GLOBAL_ENV_PATH, key, token)
+    typer.echo(f"Saved {key} to {GLOBAL_ENV_PATH}")
+    typer.echo("Applies to all Workers (their own .env takes precedence).")
+    typer.echo("Run 'hive restart <path>' on running Workers to apply.")
 
 
 comb_app = typer.Typer(help="Manage the Comb dashboard server.")

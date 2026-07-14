@@ -28,9 +28,17 @@ Claude Code OAuth credentials in `~/.claude/.credentials.json`. That access toke
 expires 8 hours after your last interactive Claude Code session, and headless
 workers cannot refresh it — agents then fail with
 `401 Invalid authentication credentials` until Claude Code is opened again.
-Run `claude setup-token` once and put the resulting long-lived token (valid ~1 year)
-in each Worker's `.env` to make Workers independent of your interactive sessions.
-Set only one of the two variables.
+Run `claude setup-token` once to mint a long-lived token (valid ~1 year), then
+store it with `hive auth`. Set only one of the two variables.
+
+### Global auth — `~/.config/hive/.env`
+
+Auth tokens usually don't need to be per-Worker. `hive auth` stores
+`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY` with `--api-key`) in the global
+Hive `.env` at `~/.config/hive/.env`, and every Worker picks it up automatically.
+Precedence: a key set in a Worker's own `.env` overrides the global value. Only
+these two auth keys are read from the global file — everything else in a Worker's
+`.env` (Telegram credentials, etc.) remains strictly per-Worker.
 
 ---
 

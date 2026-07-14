@@ -112,6 +112,27 @@ hive upgrade
 hive status   # verify all workers are RUNNING
 ```
 
+## `hive auth [--token TOKEN] [--api-key] [--status]`
+
+Store agent auth credentials for **all** Workers in the global Hive `.env`
+(`~/.config/hive/.env`, created with `600` permissions). A Worker's own `.env`
+can still override the global value.
+
+```bash
+claude setup-token        # mint a long-lived, subscription-billed token
+hive auth                 # prompts for the token (hidden input)
+hive auth --token sk-ant-oat01-...   # non-interactive
+hive auth --api-key       # store an ANTHROPIC_API_KEY instead (API billing)
+hive auth --status        # show which keys are set (values masked)
+```
+
+Why: without a stored token, Worker agents fall back to the interactive Claude
+Code OAuth token, which expires 8 hours after your last interactive session and
+cannot be refreshed by headless Workers — agents then fail with
+`401 Invalid authentication credentials` until Claude Code is opened again.
+
+Restart running Workers after setting a token: `hive restart <path>`.
+
 ## `hive logs <path> [-n <lines>] [-f]`
 
 Tail the Worker's stdout log at `<worker>/logs/out.log`.
