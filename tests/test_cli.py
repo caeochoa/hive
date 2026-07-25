@@ -413,8 +413,15 @@ class TestBoot:
         assert result.exit_code == 0
         assert "hive auth" not in result.output
 
+    def test_boot_disable_non_tty_prints_instructions(self):
+        with patch("hive.cli.app._stdin_is_tty", return_value=False):
+            result = runner.invoke(app, ["boot", "disable"])
+        assert result.exit_code == 1
+        assert "sudo launchctl bootout" in result.output
+
     def test_boot_disable_restores_launchagent(self):
         with (
+            patch("hive.cli.app._stdin_is_tty", return_value=True),
             patch("hive.shared.supervisor.uninstall_launchdaemon") as mock_uninstall,
             patch("hive.shared.supervisor.install_launchagent") as mock_agent,
             patch("hive.shared.supervisor.reload_supervisord") as mock_reload,

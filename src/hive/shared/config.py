@@ -72,7 +72,7 @@ def _parse_worker_toml(worker_dir: Path) -> tuple[dict[str, str], dict, dict, li
     return env, worker_section, agent_section, schedule_raw, comb_raw, comb_theme
 
 
-def _resolve_agent_env(worker_env: dict[str, str | None]) -> dict[str, str]:
+def resolve_agent_env(worker_env: dict[str, str | None]) -> dict[str, str]:
     """Allowlisted auth vars for the agent subprocess: global .env, then worker .env."""
     global_env = dotenv_values(GLOBAL_ENV_PATH) if GLOBAL_ENV_PATH.exists() else {}
     return {
@@ -109,7 +109,7 @@ def _build_worker_config(
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
         comb_theme=comb_theme,
-        agent_env=_resolve_agent_env(env),
+        agent_env=resolve_agent_env(env),
     )
 
 

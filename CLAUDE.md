@@ -161,6 +161,7 @@ Full reference: `docs/cli/README.md`
 | `hive upgrade` | Re-apply supervisord/plist config; fixes PATH and nodaemon issues after reboot |
 | `hive auth` | Store agent auth (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) in the global `~/.config/hive/.env`; applies to all Workers, per-Worker `.env` overrides |
 | `hive boot enable/disable/status` | Switch supervisord between boot-time LaunchDaemon (sudo) and login-time LaunchAgent |
+| `hive boot stage` | Write the daemon plist to disk without installing it, for manual sudo install in scripted setups |
 | `hive status` | `supervisorctl status` for all Workers |
 | `hive logs <path>` | Tail Worker logs (`-n <lines>`, `-f` to follow) |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |

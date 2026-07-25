@@ -370,7 +370,15 @@ def _mask_secret(value: str) -> str:
 
 @app.command()
 def auth(
-    token: str = typer.Option(None, "--token", help="The token to store (prompted if omitted)"),
+    token: str = typer.Option(
+        None,
+        "--token",
+        help=(
+            "The token to store (prompted if omitted). Avoid this flag in scripts — "
+            "the value lands in shell history and is visible to other local users via "
+            "`ps`. Prefer piping it on stdin instead, e.g. `echo \"$TOKEN\" | hive auth`."
+        ),
+    ),
     api_key: bool = typer.Option(False, "--api-key", help="Store as ANTHROPIC_API_KEY (API billing) instead of CLAUDE_CODE_OAUTH_TOKEN"),
     status: bool = typer.Option(False, "--status", help="Show which auth keys are set globally"),
 ) -> None:
@@ -429,14 +437,14 @@ def _warn_workers_without_auth_token() -> None:
     """
     from dotenv import dotenv_values
 
-    from hive.shared.config import _resolve_agent_env
+    from hive.shared.config import resolve_agent_env
     from hive.shared.registry import HiveRegistry
 
     missing = []
     for entry in HiveRegistry().list_workers():
         env_path = Path(entry.path) / ".env"
         worker_env = dotenv_values(env_path) if env_path.exists() else {}
-        if not _resolve_agent_env(worker_env):
+        if not resolve_agent_env(worker_env):
             missing.append(entry.name)
     if missing:
         typer.echo(
@@ -509,11 +517,22 @@ def boot_stage() -> None:
 @boot_app.command("disable")
 def boot_disable() -> None:
     """Remove the boot LaunchDaemon and restore the login LaunchAgent (requires sudo)."""
+    from hive.shared import supervisor
     from hive.shared.supervisor import (
         install_launchagent,
         reload_supervisord,
         uninstall_launchdaemon,
     )
+
+    if not _stdin_is_tty():
+        typer.echo(
+            "Cannot prompt for sudo in a non-interactive session. "
+            "Run 'hive boot disable' in a terminal, or run these commands manually:"
+        )
+        typer.echo(f"  sudo launchctl bootout system/{supervisor.LAUNCHD_LABEL}")
+        typer.echo(f"  sudo rm -f {supervisor.LAUNCHDAEMON_PLIST}")
+        typer.echo("  hive upgrade   # reinstalls the login LaunchAgent")
+        raise typer.Exit(code=1)
 
     uninstall_launchdaemon(_run_sudo)
     try:
