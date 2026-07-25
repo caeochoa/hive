@@ -139,7 +139,7 @@ cells = [
 
 ### Process management
 
-Workers run as OS processes managed by **supervisord**. `hive start`/`hive stop` are wrappers over `supervisorctl`. supervisord starts on login via a macOS LaunchAgent (`~/Library/LaunchAgents/com.hive.supervisord.plist`), installed once by `hive init`.
+Workers run as OS processes managed by **supervisord**. `hive start`/`hive stop` are wrappers over `supervisorctl`. supervisord starts on login via a macOS LaunchAgent (`~/Library/LaunchAgents/com.hive.supervisord.plist`), installed once by `hive init`. `hive boot enable` switches to a system LaunchDaemon (`/Library/LaunchDaemons/`, requires sudo) so supervisord starts at boot, before login, still running as the user.
 
 ### Comb (web dashboard)
 
@@ -160,6 +160,7 @@ Full reference: `docs/cli/README.md`
 | `hive remove <path>` | Unregister and stop a Worker; `--delete` also deletes the folder |
 | `hive upgrade` | Re-apply supervisord/plist config; fixes PATH and nodaemon issues after reboot |
 | `hive auth` | Store agent auth (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) in the global `~/.config/hive/.env`; applies to all Workers, per-Worker `.env` overrides |
+| `hive boot enable/disable/status` | Switch supervisord between boot-time LaunchDaemon (sudo) and login-time LaunchAgent |
 | `hive status` | `supervisorctl status` for all Workers |
 | `hive logs <path>` | Tail Worker logs (`-n <lines>`, `-f` to follow) |
 | `hive run <path>` | Internal — Worker entrypoint called by supervisord |

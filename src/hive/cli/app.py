@@ -56,7 +56,7 @@ def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> Non
     from hive.shared.supervisor import (
         ensure_supervisord_conf,
         install_launchagent,
-        is_launchagent_installed,
+        is_boot_config_installed,
         reload_supervisord,
         write_comb_block,
         write_worker_block,
@@ -66,7 +66,7 @@ def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> Non
     worker_dir = worker_dir.resolve()
 
     # First-use setup
-    if not is_launchagent_installed():
+    if not is_boot_config_installed():
         typer.echo("First-time setup: configuring supervisord and LaunchAgent...")
         ensure_supervisord_conf()
         write_comb_block()
@@ -75,6 +75,10 @@ def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> Non
         except RuntimeError as e:
             typer.echo(f"Warning: {e}", err=True)
         reload_supervisord()
+        typer.echo(
+            "Tip: run 'hive boot enable' to start Workers at boot "
+            "instead of at login (requires sudo)."
+        )
 
     # Create directory structure
     for subdir in ("commands", "memory", "logs", "dashboard"):
@@ -295,10 +299,12 @@ def chat(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
 @app.command()
 def upgrade() -> None:
     """Re-apply process management config. Run after upgrading Hive or if workers don't start after reboot."""
+    from hive.shared import supervisor
     from hive.shared.registry import HiveRegistry
     from hive.shared.supervisor import (
         ensure_supervisord_conf,
         install_launchagent,
+        is_launchdaemon_installed,
         reload_supervisord,
         write_comb_block,
         write_worker_block,
@@ -309,11 +315,25 @@ def upgrade() -> None:
     ensure_supervisord_conf()
     typer.echo("  supervisord.conf: OK")
 
-    try:
-        install_launchagent()
-        typer.echo("  LaunchAgent: OK")
-    except RuntimeError as e:
-        typer.echo(f"  Warning: {e}", err=True)
+    if is_launchdaemon_installed():
+        # Boot mode: refreshing the daemon plist needs sudo, so only report drift
+        try:
+            desired = supervisor.render_launchdaemon_plist()
+        except RuntimeError as e:
+            typer.echo(f"  Warning: {e}", err=True)
+            desired = None
+        if desired is not None and supervisor.LAUNCHDAEMON_PLIST.read_text() != desired:
+            typer.echo(
+                "  LaunchDaemon: outdated — run 'hive boot enable' to refresh (requires sudo)"
+            )
+        else:
+            typer.echo("  LaunchDaemon: OK")
+    else:
+        try:
+            install_launchagent()
+            typer.echo("  LaunchAgent: OK")
+        except RuntimeError as e:
+            typer.echo(f"  Warning: {e}", err=True)
 
     registry = HiveRegistry()
     for entry in registry.list_workers():
@@ -386,6 +406,150 @@ def auth(
     typer.echo("Run 'hive restart <path>' on running Workers to apply.")
 
 
+boot_app = typer.Typer(
+    help="Manage starting Hive at boot (LaunchDaemon) vs at login (LaunchAgent)."
+)
+app.add_typer(boot_app, name="boot")
+
+
+def _run_sudo(args: list[str]) -> subprocess.CompletedProcess:
+    """Run a command under sudo, inheriting the TTY so the password prompt works."""
+    return subprocess.run(["sudo", *args])
+
+
+def _stdin_is_tty() -> bool:
+    return sys.stdin.isatty()
+
+
+def _warn_workers_without_auth_token() -> None:
+    """Warn about Workers whose agent has no on-disk auth token.
+
+    Without one, their agent falls back to interactive Claude Code credentials,
+    which don't exist before the user logs in.
+    """
+    from dotenv import dotenv_values
+
+    from hive.shared.config import _resolve_agent_env
+    from hive.shared.registry import HiveRegistry
+
+    missing = []
+    for entry in HiveRegistry().list_workers():
+        env_path = Path(entry.path) / ".env"
+        worker_env = dotenv_values(env_path) if env_path.exists() else {}
+        if not _resolve_agent_env(worker_env):
+            missing.append(entry.name)
+    if missing:
+        typer.echo(
+            f"Warning: no agent auth token found for: {', '.join(missing)}. "
+            "Their agents rely on interactive Claude Code credentials, which are "
+            "unavailable at boot. Run 'hive auth' once (token from `claude setup-token`).",
+            err=True,
+        )
+
+
+@boot_app.command("enable")
+def boot_enable() -> None:
+    """Start supervisord at boot via a system LaunchDaemon (requires sudo)."""
+    from hive.shared import supervisor
+    from hive.shared.supervisor import (
+        ensure_supervisord_conf,
+        install_launchdaemon,
+        is_launchdaemon_installed,
+    )
+
+    if is_launchdaemon_installed():
+        try:
+            if supervisor.LAUNCHDAEMON_PLIST.read_text() == supervisor.render_launchdaemon_plist():
+                typer.echo("Boot mode already enabled.")
+                _warn_workers_without_auth_token()
+                return
+        except RuntimeError:
+            pass  # supervisord missing from PATH; fall through to reinstall
+
+    if not _stdin_is_tty():
+        staged = supervisor.LAUNCHDAEMON_STAGED
+        plist = supervisor.LAUNCHDAEMON_PLIST
+        typer.echo(
+            "Cannot prompt for sudo in a non-interactive session. "
+            "Run 'hive boot enable' in a terminal, or run these commands manually:"
+        )
+        typer.echo(f"  hive boot stage   # writes {staged}")
+        typer.echo(f"  sudo launchctl bootout system/{supervisor.LAUNCHD_LABEL}")
+        typer.echo(f"  sudo install -o root -g wheel -m 644 {staged} {plist}")
+        typer.echo(f"  sudo launchctl bootstrap system {plist}")
+        typer.echo(f"  sudo launchctl enable system/{supervisor.LAUNCHD_LABEL}")
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        "Installing a system LaunchDaemon so Workers start at boot "
+        "(sudo will prompt for your password)..."
+    )
+    ensure_supervisord_conf()
+    try:
+        install_launchdaemon(_run_sudo)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo("Boot mode enabled: supervisord now starts at boot, before login.")
+    _warn_workers_without_auth_token()
+    typer.echo("Run 'hive status' to verify Workers are running.")
+
+
+@boot_app.command("stage")
+def boot_stage() -> None:
+    """Write the LaunchDaemon plist to the staging path (for manual sudo install)."""
+    from hive.shared import supervisor
+
+    supervisor.LAUNCHDAEMON_STAGED.parent.mkdir(parents=True, exist_ok=True)
+    supervisor.LAUNCHDAEMON_STAGED.write_text(supervisor.render_launchdaemon_plist())
+    typer.echo(f"Staged LaunchDaemon plist at {supervisor.LAUNCHDAEMON_STAGED}")
+
+
+@boot_app.command("disable")
+def boot_disable() -> None:
+    """Remove the boot LaunchDaemon and restore the login LaunchAgent (requires sudo)."""
+    from hive.shared.supervisor import (
+        install_launchagent,
+        reload_supervisord,
+        uninstall_launchdaemon,
+    )
+
+    uninstall_launchdaemon(_run_sudo)
+    try:
+        install_launchagent()
+    except RuntimeError as e:
+        typer.echo(f"Warning: {e}", err=True)
+    reload_supervisord()
+    typer.echo("Boot mode disabled: supervisord now starts at login (LaunchAgent).")
+
+
+@boot_app.command("status")
+def boot_status() -> None:
+    """Show whether Hive starts at boot (daemon), at login (agent), or not at all."""
+    from hive.shared import supervisor
+    from hive.shared.supervisor import is_launchagent_installed, is_launchdaemon_installed
+
+    if is_launchdaemon_installed():
+        typer.echo(f"Mode: daemon (starts at boot) — {supervisor.LAUNCHDAEMON_PLIST}")
+        result = subprocess.run(
+            ["launchctl", "print", f"system/{supervisor.LAUNCHD_LABEL}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and "state = running" in result.stdout:
+            typer.echo("State: running")
+        else:
+            typer.echo(
+                "State: unknown — check with: "
+                f"sudo launchctl print system/{supervisor.LAUNCHD_LABEL}"
+            )
+    elif is_launchagent_installed():
+        typer.echo(f"Mode: agent (starts at login) — {supervisor.LAUNCHAGENT_PLIST}")
+    else:
+        typer.echo("Not installed. Run 'hive init <name>' or 'hive upgrade' first.")
+
+
 comb_app = typer.Typer(help="Manage the Comb dashboard server.")
 app.add_typer(comb_app, name="comb")
 
@@ -436,8 +600,3 @@ def _write_if_missing(path: Path, content: str) -> None:
         path.write_text(content)
 
 
-def is_launchagent_installed() -> bool:
-    """Check if the LaunchAgent plist exists."""
-    from hive.shared.supervisor import LAUNCHAGENT_PLIST
-
-    return LAUNCHAGENT_PLIST.exists()

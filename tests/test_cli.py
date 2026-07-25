@@ -31,7 +31,7 @@ def test_init_requires_name():
 
 
 class TestInit:
-    @patch("hive.shared.supervisor.is_launchagent_installed", return_value=True)
+    @patch("hive.shared.supervisor.is_boot_config_installed", return_value=True)
     @patch("hive.shared.supervisor.reload_supervisord")
     @patch("hive.shared.supervisor.write_worker_block")
     @patch("subprocess.run")
@@ -54,7 +54,7 @@ class TestInit:
         assert (worker_dir / ".gitignore").exists()
         assert (worker_dir / "requirements.txt").exists()
 
-    @patch("hive.shared.supervisor.is_launchagent_installed", return_value=True)
+    @patch("hive.shared.supervisor.is_boot_config_installed", return_value=True)
     @patch("hive.shared.supervisor.reload_supervisord")
     @patch("hive.shared.supervisor.write_worker_block")
     @patch("subprocess.run")
@@ -70,7 +70,7 @@ class TestInit:
         mock_write_block.assert_called_once()
         mock_reload.assert_called_once()
 
-    @patch("hive.shared.supervisor.is_launchagent_installed", return_value=True)
+    @patch("hive.shared.supervisor.is_boot_config_installed", return_value=True)
     @patch("hive.shared.supervisor.reload_supervisord")
     @patch("hive.shared.supervisor.write_worker_block")
     @patch("subprocess.run")
@@ -93,7 +93,7 @@ class TestInit:
     @patch("hive.shared.supervisor.write_comb_block")
     @patch("hive.shared.supervisor.ensure_supervisord_conf")
     @patch("hive.shared.supervisor.install_launchagent")
-    @patch("hive.shared.supervisor.is_launchagent_installed", return_value=False)
+    @patch("hive.shared.supervisor.is_boot_config_installed", return_value=False)
     @patch("subprocess.run")
     def test_first_use_setup(
         self,
@@ -255,6 +255,7 @@ class TestUpgrade:
         mock_registry.list_workers.return_value = []
         with (
             patch("hive.shared.supervisor.ensure_supervisord_conf") as mock_ensure,
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
             patch("hive.shared.supervisor.install_launchagent") as mock_install,
             patch("hive.shared.supervisor.write_comb_block") as mock_comb,
             patch("hive.shared.supervisor.reload_supervisord") as mock_reload,
@@ -276,6 +277,7 @@ class TestUpgrade:
         ]
         with (
             patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
             patch("hive.shared.supervisor.install_launchagent"),
             patch("hive.shared.supervisor.reload_supervisord"),
             patch("hive.shared.supervisor.write_comb_block"),
@@ -285,6 +287,167 @@ class TestUpgrade:
             result = runner.invoke(app, ["upgrade"])
         assert result.exit_code == 0
         mock_write.assert_called_once_with("budget", tmp_path)
+
+    def test_upgrade_daemon_mode_ok_skips_launchagent(self, tmp_path):
+        daemon_plist = tmp_path / "com.hive.supervisord.plist"
+        daemon_plist.write_text("RENDERED")
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=True),
+            patch("hive.shared.supervisor.LAUNCHDAEMON_PLIST", daemon_plist),
+            patch("hive.shared.supervisor.render_launchdaemon_plist", return_value="RENDERED"),
+            patch("hive.shared.supervisor.install_launchagent") as mock_install,
+            patch("hive.shared.supervisor.write_comb_block"),
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        assert "LaunchDaemon: OK" in result.output
+        mock_install.assert_not_called()
+
+    def test_upgrade_daemon_mode_reports_drift(self, tmp_path):
+        daemon_plist = tmp_path / "com.hive.supervisord.plist"
+        daemon_plist.write_text("STALE")
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=True),
+            patch("hive.shared.supervisor.LAUNCHDAEMON_PLIST", daemon_plist),
+            patch("hive.shared.supervisor.render_launchdaemon_plist", return_value="RENDERED"),
+            patch("hive.shared.supervisor.install_launchagent") as mock_install,
+            patch("hive.shared.supervisor.write_comb_block"),
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        assert "hive boot enable" in result.output
+        mock_install.assert_not_called()
+
+
+class TestBoot:
+    def test_boot_enable_non_tty_prints_instructions(self):
+        with patch("hive.cli.app._stdin_is_tty", return_value=False):
+            result = runner.invoke(app, ["boot", "enable"])
+        assert result.exit_code == 1
+        assert "sudo launchctl bootstrap system" in result.output
+
+    def test_boot_enable_installs_daemon(self, tmp_path):
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch("hive.cli.app._stdin_is_tty", return_value=True),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
+            patch("hive.shared.supervisor.ensure_supervisord_conf") as mock_ensure,
+            patch("hive.shared.supervisor.install_launchdaemon") as mock_install,
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["boot", "enable"])
+        assert result.exit_code == 0
+        mock_ensure.assert_called_once()
+        mock_install.assert_called_once()
+
+    def test_boot_enable_already_enabled_is_noop(self, tmp_path):
+        daemon_plist = tmp_path / "com.hive.supervisord.plist"
+        daemon_plist.write_text("RENDERED")
+        with (
+            patch("hive.cli.app._stdin_is_tty", return_value=True),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=True),
+            patch("hive.shared.supervisor.LAUNCHDAEMON_PLIST", daemon_plist),
+            patch("hive.shared.supervisor.render_launchdaemon_plist", return_value="RENDERED"),
+            patch("hive.shared.supervisor.install_launchdaemon") as mock_install,
+        ):
+            result = runner.invoke(app, ["boot", "enable"])
+        assert result.exit_code == 0
+        assert "already" in result.output.lower()
+        mock_install.assert_not_called()
+
+    def test_boot_enable_warns_workers_without_auth_token(self, tmp_path):
+        from hive.shared.models import WorkerEntry
+
+        worker = tmp_path / "budget"
+        worker.mkdir()
+        (worker / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\n")
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = [
+            WorkerEntry(name="budget", path=str(worker)),
+        ]
+        with (
+            patch("hive.cli.app._stdin_is_tty", return_value=True),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
+            patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.install_launchdaemon"),
+            patch("hive.shared.config.GLOBAL_ENV_PATH", tmp_path / "missing-global.env"),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["boot", "enable"])
+        assert result.exit_code == 0
+        assert "budget" in result.output
+        assert "hive auth" in result.output
+
+    def test_boot_enable_no_warning_with_global_token(self, tmp_path):
+        from hive.shared.models import WorkerEntry
+
+        worker = tmp_path / "budget"
+        worker.mkdir()
+        (worker / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\n")
+        global_env = tmp_path / "global.env"
+        global_env.write_text("CLAUDE_CODE_OAUTH_TOKEN=oat-123\n")
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = [
+            WorkerEntry(name="budget", path=str(worker)),
+        ]
+        with (
+            patch("hive.cli.app._stdin_is_tty", return_value=True),
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
+            patch("hive.shared.supervisor.ensure_supervisord_conf"),
+            patch("hive.shared.supervisor.install_launchdaemon"),
+            patch("hive.shared.config.GLOBAL_ENV_PATH", global_env),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+        ):
+            result = runner.invoke(app, ["boot", "enable"])
+        assert result.exit_code == 0
+        assert "hive auth" not in result.output
+
+    def test_boot_disable_restores_launchagent(self):
+        with (
+            patch("hive.shared.supervisor.uninstall_launchdaemon") as mock_uninstall,
+            patch("hive.shared.supervisor.install_launchagent") as mock_agent,
+            patch("hive.shared.supervisor.reload_supervisord") as mock_reload,
+        ):
+            result = runner.invoke(app, ["boot", "disable"])
+        assert result.exit_code == 0
+        mock_uninstall.assert_called_once()
+        mock_agent.assert_called_once()
+        mock_reload.assert_called_once()
+
+    def test_boot_status_daemon(self):
+        with patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=True):
+            result = runner.invoke(app, ["boot", "status"])
+        assert result.exit_code == 0
+        assert "boot" in result.output.lower()
+
+    def test_boot_status_agent(self):
+        with (
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
+            patch("hive.shared.supervisor.is_launchagent_installed", return_value=True),
+        ):
+            result = runner.invoke(app, ["boot", "status"])
+        assert result.exit_code == 0
+        assert "login" in result.output.lower()
+
+    def test_boot_status_neither(self):
+        with (
+            patch("hive.shared.supervisor.is_launchdaemon_installed", return_value=False),
+            patch("hive.shared.supervisor.is_launchagent_installed", return_value=False),
+        ):
+            result = runner.invoke(app, ["boot", "status"])
+        assert result.exit_code == 0
+        assert "not installed" in result.output.lower()
 
 
 class TestAuth:

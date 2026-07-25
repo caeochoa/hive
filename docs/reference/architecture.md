@@ -116,9 +116,17 @@ stderr_logfile=/path/to/worker/logs/err.log
 
 Written by `hive start`; removed by `hive remove`. Reloaded via `supervisorctl reread && supervisorctl update`.
 
-### macOS LaunchAgent
+### macOS launchd integration
 
-supervisord itself starts on user login via `~/Library/LaunchAgents/com.hive.supervisord.plist`. Installed once during `hive init` on first use, alongside the Comb supervisord block.
+supervisord itself is started by launchd, in one of two modes:
+
+- **Login mode (default)** — a LaunchAgent at `~/Library/LaunchAgents/com.hive.supervisord.plist`. Installed once during `hive init` on first use, alongside the Comb supervisord block. No sudo required, but LaunchAgents only load when the user logs in, so after a reboot Workers stay down until login.
+- **Boot mode (opt-in)** — a LaunchDaemon at `/Library/LaunchDaemons/com.hive.supervisord.plist`, installed by `hive boot enable` (requires sudo). launchd starts it at system boot, before any login; the plist's `UserName` key makes supervisord run as your user, so all paths, sockets, and Worker folders behave exactly as in login mode. `hive boot disable` reverts to the LaunchAgent.
+
+Boot-mode caveats:
+
+- **FileVault**: on an encrypted disk, macOS waits at the pre-boot unlock screen, so the daemon only starts after the disk is unlocked.
+- **Agent auth**: Workers need an on-disk auth token (`hive auth`, or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in the Worker `.env` — see [`../config/README.md`](../config/README.md)). Without one, the agent falls back to interactive Claude Code credentials, which don't exist before login.
 
 CLI reference: [`../cli/README.md`](../cli/README.md).
 

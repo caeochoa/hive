@@ -6,7 +6,13 @@ from hive.shared.supervisor import (
     ensure_supervisord_conf,
     get_worker_conf_path,
     install_launchagent,
+    install_launchdaemon,
+    is_boot_config_installed,
+    is_launchdaemon_installed,
     remove_worker_block,
+    render_launchdaemon_plist,
+    uninstall_launchagent,
+    uninstall_launchdaemon,
     write_comb_block,
     write_worker_block,
 )
@@ -127,3 +133,153 @@ def test_remove_nonexistent_is_noop(conf_dir):
 def test_get_worker_conf_path(conf_dir):
     path = get_worker_conf_path("budget", conf_dir=conf_dir)
     assert path.name == "worker-budget.conf"
+
+
+# ------------------------------------------------------------------ #
+# LaunchDaemon (boot mode)
+# ------------------------------------------------------------------ #
+
+
+@pytest.fixture
+def daemon_paths(tmp_path):
+    """Patch every plist/conf path constant into tmp_path; yields a namespace."""
+    paths = MagicMock()
+    paths.agent_plist = tmp_path / "LaunchAgents" / "com.hive.supervisord.plist"
+    paths.daemon_plist = tmp_path / "LaunchDaemons" / "com.hive.supervisord.plist"
+    paths.staged = tmp_path / "hive" / "com.hive.supervisord.daemon.plist"
+    paths.conf = tmp_path / "hive" / "supervisord.conf"
+    paths.agent_plist.parent.mkdir(parents=True)
+    paths.daemon_plist.parent.mkdir(parents=True)
+    with (
+        patch("hive.shared.supervisor.LAUNCHAGENT_PLIST", paths.agent_plist),
+        patch("hive.shared.supervisor.LAUNCHDAEMON_PLIST", paths.daemon_plist),
+        patch("hive.shared.supervisor.LAUNCHDAEMON_STAGED", paths.staged),
+        patch("hive.shared.supervisor.SUPERVISORD_CONF", paths.conf),
+    ):
+        yield paths
+
+
+def test_render_launchdaemon_plist_contents(daemon_paths):
+    with (
+        patch("hive.shared.supervisor.shutil.which", return_value="/opt/homebrew/bin/supervisord"),
+        patch("hive.shared.supervisor.getpass.getuser", return_value="alice"),
+        patch.dict("os.environ", {"PATH": "/opt/homebrew/bin:/usr/bin"}, clear=False),
+    ):
+        content = render_launchdaemon_plist()
+    assert "<string>com.hive.supervisord</string>" in content
+    assert "<string>/opt/homebrew/bin/supervisord</string>" in content
+    assert str(daemon_paths.conf) in content
+    assert "<key>UserName</key>" in content
+    assert "<string>alice</string>" in content
+    assert "<key>HOME</key>" in content
+    assert "<key>USER</key>" in content
+    assert "<key>LOGNAME</key>" in content
+    assert "<key>PATH</key>" in content
+    assert "/opt/homebrew/bin:/usr/bin" in content
+    assert "<key>RunAtLoad</key>" in content
+    assert "<key>KeepAlive</key>" in content
+    assert "<key>StandardOutPath</key>" in content
+
+
+def test_render_launchdaemon_plist_requires_supervisord(daemon_paths):
+    with patch("hive.shared.supervisor.shutil.which", return_value=None):
+        with pytest.raises(RuntimeError):
+            render_launchdaemon_plist()
+
+
+def test_is_launchdaemon_installed(daemon_paths):
+    assert not is_launchdaemon_installed()
+    daemon_paths.daemon_plist.write_text("<plist/>")
+    assert is_launchdaemon_installed()
+
+
+def test_is_boot_config_installed_daemon_only(daemon_paths):
+    daemon_paths.daemon_plist.write_text("<plist/>")
+    assert is_boot_config_installed()
+
+
+def test_is_boot_config_installed_agent_only(daemon_paths):
+    daemon_paths.agent_plist.write_text("<plist/>")
+    with patch("hive.shared.supervisor.subprocess.run", return_value=MagicMock(returncode=0)):
+        assert is_boot_config_installed()
+
+
+def test_is_boot_config_installed_neither(daemon_paths):
+    with patch("hive.shared.supervisor.subprocess.run", return_value=MagicMock(returncode=1)):
+        assert not is_boot_config_installed()
+
+
+def test_uninstall_launchagent_removes_plist(daemon_paths):
+    daemon_paths.agent_plist.write_text("<plist/>")
+    with patch(
+        "hive.shared.supervisor.subprocess.run", return_value=MagicMock(returncode=0)
+    ) as mock_run:
+        uninstall_launchagent()
+    assert not daemon_paths.agent_plist.exists()
+    first_cmd = mock_run.call_args_list[0].args[0]
+    assert first_cmd[:2] == ["launchctl", "bootout"]
+    assert first_cmd[2].endswith("/com.hive.supervisord")
+
+
+def test_install_launchdaemon_command_sequence(daemon_paths):
+    daemon_paths.agent_plist.write_text("<plist/>")
+    sudo_calls = []
+
+    def run_sudo(args):
+        sudo_calls.append(args)
+        return MagicMock(returncode=0)
+
+    with (
+        patch("hive.shared.supervisor.shutil.which", return_value="/opt/homebrew/bin/supervisord"),
+        patch("hive.shared.supervisor.getpass.getuser", return_value="alice"),
+        patch("hive.shared.supervisor.subprocess.run", return_value=MagicMock(returncode=0)),
+    ):
+        install_launchdaemon(run_sudo)
+
+    # Staged plist written with rendered content; LaunchAgent migrated away
+    assert daemon_paths.staged.exists()
+    assert "<key>UserName</key>" in daemon_paths.staged.read_text()
+    assert not daemon_paths.agent_plist.exists()
+
+    # sudo sequence: bootout -> install(root:wheel 644) -> bootstrap -> enable
+    assert sudo_calls[0] == ["launchctl", "bootout", "system/com.hive.supervisord"]
+    assert sudo_calls[1] == [
+        "install", "-o", "root", "-g", "wheel", "-m", "644",
+        str(daemon_paths.staged), str(daemon_paths.daemon_plist),
+    ]
+    assert sudo_calls[2] == ["launchctl", "bootstrap", "system", str(daemon_paths.daemon_plist)]
+    assert sudo_calls[3] == ["launchctl", "enable", "system/com.hive.supervisord"]
+
+
+def test_install_launchdaemon_raises_when_bootstrap_fails(daemon_paths):
+    def run_sudo(args):
+        failing = args[:2] in (["launchctl", "bootstrap"], ["launchctl", "load"])
+        return MagicMock(returncode=1 if failing else 0)
+
+    with (
+        patch("hive.shared.supervisor.shutil.which", return_value="/opt/homebrew/bin/supervisord"),
+        patch("hive.shared.supervisor.getpass.getuser", return_value="alice"),
+        patch("hive.shared.supervisor.subprocess.run", return_value=MagicMock(returncode=0)),
+    ):
+        with pytest.raises(RuntimeError):
+            install_launchdaemon(run_sudo)
+
+
+def test_uninstall_launchdaemon_commands(daemon_paths):
+    sudo_calls = []
+
+    def run_sudo(args):
+        sudo_calls.append(args)
+        return MagicMock(returncode=0)
+
+    uninstall_launchdaemon(run_sudo)
+
+    assert sudo_calls[0] == ["launchctl", "bootout", "system/com.hive.supervisord"]
+    assert sudo_calls[1] == ["rm", "-f", str(daemon_paths.daemon_plist)]
+
+
+def test_wait_for_supervisord_exit_returns_when_no_pidfile(daemon_paths):
+    from hive.shared.supervisor import _wait_for_supervisord_exit
+
+    # No pidfile next to SUPERVISORD_CONF -> returns immediately (well under timeout)
+    _wait_for_supervisord_exit(timeout=0.2)

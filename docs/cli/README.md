@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `hive` CLI is the primary interface for creating, managing, and inspecting Workers. All commands are invoked as `hive <command> [args]`. Workers are managed as supervisord processes; supervisord itself is installed once and runs as a macOS LaunchAgent.
+The `hive` CLI is the primary interface for creating, managing, and inspecting Workers. All commands are invoked as `hive <command> [args]`. Workers are managed as supervisord processes; supervisord itself is installed once and started by launchd — at login by default (LaunchAgent), or at boot via `hive boot enable` (LaunchDaemon).
 
 ## `hive init <name>`
 
@@ -11,7 +11,7 @@ hive init <name>
 ```
 
 What it does:
-1. On first use: installs supervisord configuration and a macOS LaunchAgent so supervisord starts on login.
+1. On first use: installs supervisord configuration and a macOS LaunchAgent so supervisord starts on login. (To start at boot instead, run `hive boot enable` afterwards.)
 2. Creates `<name>/` with subdirectories: `commands/`, `memory/`, `logs/`, `dashboard/`.
 3. Runs `git init` (skipped if `.git` already exists).
 4. Creates a `.venv` using the system Python (skipped if already exists).
@@ -96,20 +96,48 @@ hive upgrade
 What it does:
 
 1. Ensures `supervisord.conf` runs supervisord in foreground mode (`nodaemon=true`), required for correct launchd supervision. Migrates existing configs automatically.
-2. Regenerates the macOS LaunchAgent plist (`~/Library/LaunchAgents/com.hive.supervisord.plist`) if it is missing the `EnvironmentVariables` section, so supervisord and its child processes inherit the user's `PATH`.
+2. In login mode: regenerates the macOS LaunchAgent plist (`~/Library/LaunchAgents/com.hive.supervisord.plist`) if it is missing the `EnvironmentVariables` section, so supervisord and its child processes inherit the user's `PATH`. In boot mode: compares the installed LaunchDaemon plist against the current environment and reports if it's outdated (refreshing needs sudo, so run `hive boot enable` to apply — `upgrade` itself never prompts for a password).
 3. Rewrites every registered Worker's supervisord conf to use the absolute path to `hive`, so Workers start correctly under launchd's minimal environment.
 4. Rewrites the Comb dashboard conf with the absolute `hive` path.
 5. Signals supervisord to reload and apply all changes.
 
 **When to run:**
 
-- Workers aren't running after a Mac reboot
+- Workers aren't running after a Mac reboot (and you've logged in)
 - After `uv tool install hive` or `uv tool upgrade hive` on a machine with existing Workers
 - After any manual change to supervisord configs that may have reverted settings
 
 ```bash
 hive upgrade
 hive status   # verify all workers are RUNNING
+```
+
+If the problem is that Workers only come back *after you log in*, that's the LaunchAgent working as designed — use `hive boot enable` to start them at boot instead.
+
+## `hive boot enable|disable|status`
+
+Control whether supervisord (and therefore all Workers) starts at **boot** or at **login**.
+
+```bash
+hive boot enable    # switch to boot mode (requires sudo)
+hive boot disable   # switch back to login mode (requires sudo)
+hive boot status    # show the current mode
+hive boot stage     # write the daemon plist for manual sudo install (scripted setups)
+```
+
+`enable` installs a system LaunchDaemon at `/Library/LaunchDaemons/com.hive.supervisord.plist` and removes the login LaunchAgent. The daemon runs supervisord as your user (`UserName` key), so sockets, logs, and Worker folders are unchanged. `disable` reverses the migration — you are never left with neither.
+
+Requirements and caveats:
+
+- `enable`/`disable` run `sudo` interactively; in non-interactive sessions they print the exact manual commands instead.
+- Workers need an on-disk agent auth token to work before login — run `hive auth` once (see below). `enable` warns about Workers that would boot without one.
+- With FileVault enabled, the daemon starts only after the disk is unlocked at the pre-boot screen.
+
+Verify without rebooting:
+
+```bash
+sudo launchctl print system/com.hive.supervisord   # state = running
+hive status                                        # workers RUNNING
 ```
 
 ## `hive auth [--token TOKEN] [--api-key] [--status]`
