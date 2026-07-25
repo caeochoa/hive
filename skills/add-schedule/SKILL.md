@@ -33,7 +33,7 @@ agent_prompt = "Prepare the weekly summary and write it to memory/weekly.md"
 **`agent_prompt` jobs:**
 - Route a prompt through the Claude agent
 - Response is sent to each allowed user via Telegram
-- Incurs LLM cost — consider cost-guard fields
+- Incurs LLM cost — be mindful of cron frequency (see note on cost-guard fields below)
 - Auto-commits any file changes after completion
 
 **Cron syntax (5 fields, left to right):**
@@ -52,18 +52,18 @@ Common examples:
 - `0 20 * * 1-5` — weekdays at 20:00
 - `0 */6 * * *` — every 6 hours
 
-**Cost-guard fields (for `agent_prompt` jobs):**
+**Cost-guard fields (for `agent_prompt` jobs) — currently no-ops, not real protection:**
 
 ```toml
 [[schedule]]
 cron = "0 8 * * *"
 agent_prompt = "Send the morning brief"
-skip_if_five_hour_above = 0.50   # skip if 5-hour spend exceeds $0.50
-skip_if_seven_day_above = 5.00   # skip if 7-day spend exceeds $5.00
-notify_on_skip = true            # send Telegram message when skipped (default: true)
+skip_if_five_hour_above = 0.50   # accepted but has no effect today
+skip_if_seven_day_above = 5.00   # accepted but has no effect today
+notify_on_skip = true            # accepted but has no effect today
 ```
 
-Usage data is tracked internally by Hive. Scheduled jobs are skipped (not cancelled) — they resume at the next scheduled time if spend drops below the threshold.
+**Important:** these fields are accepted in the TOML schema but do nothing right now — the SDK doesn't expose subscription usage data, so Hive can't evaluate the thresholds and logs a warning at startup when they're configured. They're kept only for forward compatibility with a future usage-tracking feature. Don't present them to the user as working spend protection. If they're worried about runaway cost on a frequent `agent_prompt` schedule, the real mitigation today is choosing a more conservative cron interval (e.g. don't default to hourly for something that could be daily).
 
 **Important:** Scheduled jobs do NOT trigger config reload or Worker restart. After editing `hive.toml`, apply with:
 
@@ -86,7 +86,7 @@ Ask the user (or infer from context) what they want automated:
 - **What should happen?** Describe the task
 - **When should it run?** Time, day, frequency
 - **Script or agent prompt?** Use `run` if there's a command script that does exactly this with no arguments. Use `agent_prompt` if you want the agent to reason, write summaries, or send a natural language message.
-- **For `agent_prompt` jobs:** Does the user want cost-guard thresholds? Suggest reasonable defaults if they're running multiple scheduled prompts.
+- **For frequent `agent_prompt` jobs:** flag the cost tradeoff and check the cron interval is actually necessary — don't rely on cost-guard fields, they're currently no-ops (see above).
 
 If the right command script doesn't exist yet for a `run` job, offer to create it (or suggest using the `add-command` skill).
 
@@ -94,7 +94,7 @@ If the right command script doesn't exist yet for a `run` job, offer to create i
 
 Add the block to `hive.toml`. Multiple `[[schedule]]` sections are fine — TOML array-of-tables syntax handles it.
 
-For `agent_prompt` jobs, recommend cost-guard fields if the Worker already has other scheduled prompts or if the cron is frequent (more than daily).
+Don't add the cost-guard fields by default — they're no-ops today and would give a false sense of protection. If the Worker already has other scheduled prompts or the cron is frequent, address cost by keeping the interval conservative instead.
 
 ## Step 4: Apply and verify
 
@@ -114,4 +114,4 @@ After updating `hive.toml`:
 - **Prefer `run` over `agent_prompt` for deterministic tasks.** If the output is predictable (fetch data, write a file, send a fixed report), use a script — it's cheaper, faster, and more reliable.
 - **Use `agent_prompt` for synthesis tasks.** Summarising recent activity, generating a narrative brief, or making a judgment call based on current state are good uses for the agent.
 - **Write `agent_prompt` strings that are specific.** "Send the morning brief" is vague. "Read memory/activity.md, summarise the last 24 hours of activity in 3 bullet points, and send it as the morning brief" gives the agent clear instructions.
-- **Always suggest cost-guard fields for `agent_prompt` jobs on frequent schedules.** A bug or runaway prompt on an hourly schedule can be expensive.
+- **Don't recommend cost-guard fields as protection.** `skip_if_five_hour_above`/`skip_if_seven_day_above`/`notify_on_skip` are schema-valid but currently no-ops. For a runaway-cost concern on a frequent `agent_prompt` schedule, push back on the cron frequency itself instead — e.g. suggest every 6 hours instead of hourly.
