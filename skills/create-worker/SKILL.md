@@ -67,8 +67,8 @@ system_prompt = "..."                # optional; disables self-config instructio
 [[schedule]]
 cron = "0 8 * * *"
 run = "commands/script.py"           # OR agent_prompt = "Do something"
-# skip_if_five_hour_above = 0.50     # accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
-# skip_if_seven_day_above = 5.00     # accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
+# skip_if_five_hour_above = 80.0     # percentage (0-100); accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
+# skip_if_seven_day_above = 90.0     # percentage (0-100); accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
 # notify_on_skip = true              # accepted but currently a no-op (nothing to notify about while the above are no-ops)
 
 [comb]

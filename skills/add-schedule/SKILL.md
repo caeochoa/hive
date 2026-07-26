@@ -58,8 +58,8 @@ Common examples:
 [[schedule]]
 cron = "0 8 * * *"
 agent_prompt = "Send the morning brief"
-skip_if_five_hour_above = 0.50   # accepted but has no effect today
-skip_if_seven_day_above = 5.00   # accepted but has no effect today
+skip_if_five_hour_above = 80.0   # percentage (0-100); accepted but has no effect today
+skip_if_seven_day_above = 90.0   # percentage (0-100); accepted but has no effect today
 notify_on_skip = true            # accepted but has no effect today
 ```
 
