@@ -70,7 +70,8 @@ async def typing_action(bot, chat_id: int):
 
     async def _keep_typing():
         while True:
-            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            with suppress(Exception):
+                await bot.send_chat_action(chat_id=chat_id, action="typing")
             await asyncio.sleep(4)  # refresh before Telegram's ~5s expiry
 
     task = asyncio.create_task(_keep_typing())
