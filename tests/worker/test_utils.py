@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from telegram.error import BadRequest
 
-from hive.worker.utils import send_long_message, md_to_telegram_html
+from hive.worker.utils import send_long_message, md_to_telegram_html, typing_action
 
 
 # ---------------------------------------------------------------------------
@@ -204,3 +205,28 @@ class TestBadRequestFallback:
 
         with pytest.raises(BadRequest, match="Message is too long"):
             await send_long_message(target, "some text", parse_mode="HTML")
+
+
+# ---------------------------------------------------------------------------
+# typing_action
+# ---------------------------------------------------------------------------
+
+
+class TestTypingAction:
+    async def test_ping_failure_does_not_propagate(self) -> None:
+        bot = AsyncMock()
+        bot.send_chat_action = AsyncMock(side_effect=ConnectionError("boom"))
+
+        async with typing_action(bot, chat_id=123):
+            # Let the background _keep_typing task run and fail at least once.
+            await asyncio.sleep(0)
+
+        bot.send_chat_action.assert_awaited()
+
+    async def test_sends_typing_action_and_cancels_cleanly(self) -> None:
+        bot = AsyncMock()
+
+        async with typing_action(bot, chat_id=123):
+            await asyncio.sleep(0)
+
+        bot.send_chat_action.assert_awaited_with(chat_id=123, action="typing")
