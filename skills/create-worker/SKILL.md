@@ -61,16 +61,18 @@ memory_dir = "memory/"               # default
 max_turns = 10                       # default
 system_prompt = "..."                # optional; disables self-config instructions if set
 # thinking_budget_tokens = 5000      # optional; enables extended thinking
+# tool_verbosity = "minimal"         # optional; none|minimal|moderate|detailed|verbose — how much tool activity streams to Telegram (default none)
+# show_thinking = true               # optional; stream thinking blocks as Telegram spoilers (default false)
 
 [[schedule]]
 cron = "0 8 * * *"
 run = "commands/script.py"           # OR agent_prompt = "Do something"
-# skip_if_five_hour_above = 0.50     # optional; skip if 5-hour usage exceeds this USD threshold
-# skip_if_seven_day_above = 5.00     # optional; skip if 7-day usage exceeds this USD threshold
-# notify_on_skip = true              # optional; send Telegram message when job is skipped (default true)
+# skip_if_five_hour_above = 80.0     # percentage (0-100); accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
+# skip_if_seven_day_above = 90.0     # percentage (0-100); accepted but currently a no-op — reserved for a future usage-based skip feature, has no effect today
+# notify_on_skip = true              # accepted but currently a no-op (nothing to notify about while the above are no-ops)
 
 [comb]
-# theme = "dark"                     # optional dashboard theme
+# theme = "terminal-dark"            # optional dashboard theme (this is the default)
 cells = [
   { type = "log",      title = "...", source = "logs/out.log" },
   { type = "file",     title = "...", source = "memory/notes.txt" },
@@ -116,6 +118,7 @@ What you need to know:
 - **Should it run anything on a schedule?** Suggest based on context (daily summaries, weekly reports, periodic data fetches).
 - **What should the agent's personality/focus be?** This becomes the system prompt. If the code context is strong enough, propose one.
 - **Do they have their Telegram bot token and user ID ready?**
+- **Should tool activity or thinking stream to Telegram as it happens, or just the final reply?** Only worth asking if the user seems to want visibility into what the agent is doing (e.g. debugging, or a Worker that runs long multi-tool tasks). Most Workers are fine with the default (silent tool calls, no thinking shown).
 
 Don't ask about things that have sensible defaults (model, max_turns, memory_dir) unless the user brings them up.
 
@@ -132,6 +135,7 @@ After scaffolding, remind the user to fill in `.env` with their bot token and us
 Edit the generated `hive.toml` to include:
 
 - A tailored `system_prompt` in `[agent]` that reflects what this Worker does. Be specific — "You are a budget tracking assistant. You help the user log expenses, categorize spending, and generate financial summaries. You store all data in memory/." is much better than "You are a helpful assistant."
+- `tool_verbosity` / `show_thinking` in `[agent]` only if the user asked for visibility into tool activity — leave commented out (defaults: silent) otherwise
 - `[[schedule]]` blocks if the user wants recurring tasks
 - `[comb]` cells if the user wants a dashboard
 
