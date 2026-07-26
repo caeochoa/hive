@@ -153,6 +153,7 @@ Before doing this, walk the user through:
 1. Add the external package to **Hive's own project** (e.g. `uv add --editable ../path-to-project` run from the Hive repo) — not the Worker's `.venv`. `make_app` code always runs inside Hive's shared Comb process.
 2. Check that the package's own `fastapi`/`pydantic` (and any other shared-surface dependency) version requirements are compatible with Hive's pins — this isn't validated automatically and a conflict will only surface as an import error at Comb startup.
 3. Point the import at the module that makes up the app's *web surface* only (e.g. its `web.py`), not the top-level package — so unrelated heavier dependencies used elsewhere in that project (a scraper, a CLI, etc.) aren't pulled into Hive's environment as transitive requirements.
+4. **Check whether the app being wrapped relies on `lifespan=`/`@app.on_event("startup")` to initialize state** (e.g. opening a DB connection or HTTP client into `app.state`). These handlers **never run** on a sub-app mounted via `app.mount()` — standard Starlette/FastAPI behavior. If the wrapped app does this, its startup-created resource will be missing and the first request will fail with an unclear error (e.g. `AttributeError`). The fix has to happen in the wrapped app itself: move that initialization into the `create_app`/factory function body (eager, at call time) or make it lazy on first use — not something Comb can work around from the mounting side.
 
 ## Step 5: Apply changes
 

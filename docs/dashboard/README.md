@@ -241,6 +241,8 @@ def make_app(worker_dir):
 
 Before doing this: add the external package to **Hive's own project** (e.g. `uv add --editable ../my-existing-project` from the Hive repo), not the Worker's `.venv` — `make_app`/`make_router` code always runs inside the Comb process, using Hive's environment. Check that the package's own `fastapi`/`pydantic` (and other shared-surface package) version requirements are compatible with Hive's pins first; this isn't validated automatically. Prefer importing only the module that makes up the app's web surface (e.g. `web.py`) rather than the top-level package, so unrelated heavier dependencies used elsewhere in that project aren't forced into Hive's environment as transitive requirements.
 
+> **Important:** a sub-app's `lifespan=` context manager and `@app.on_event("startup"/"shutdown")` handlers **never run** when mounted via `app.mount()` — this is standard Starlette/FastAPI behavior, not specific to Comb. If the app you're wrapping opens a DB connection, HTTP client, or other resource into `app.state` at startup this way, that resource silently never gets created, and the first request will fail with an `AttributeError`/`None` rather than a clear startup error. Instead, initialize such resources eagerly at module import time (e.g. as part of `create_app`/`make_app` itself) or lazily on first use — not via `lifespan=`.
+
 > **Note:** App routers and apps are mounted when the Comb server starts. After adding or changing an `app` cell — or its underlying `make_app`/`make_router` code or static assets — run `hive comb restart` for the change to take effect.
 
 ## Directory Source Behavior
