@@ -5,8 +5,8 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 DEFAULT_CONF_DIR = Path.home() / ".config" / "hive" / "supervisord" / "conf.d"
 SUPERVISORD_CONF = Path.home() / ".config" / "hive" / "supervisord" / "supervisord.conf"
