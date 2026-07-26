@@ -161,9 +161,10 @@ Embeds a full-page interactive application in your dashboard. The cell renders a
 { type = "app", title = "Browse Transactions", source = "dashboard/browse_app.py" }
 ```
 
-The `source` path (relative to the Worker folder) must point to a Python file that exports either:
+The `source` path (relative to the Worker folder) must point to a Python file that exports one of:
 
-- **`make_router(worker_dir: Path) -> APIRouter`** *(preferred)* — a factory function called once at Comb startup with the Worker folder path as an argument. Use this when your app needs to read Worker files.
+- **`make_app(worker_dir: Path) -> FastAPI`** *(use this for a full app, e.g. a React frontend + API)* — a factory function returning a complete `FastAPI` instance, mounted with `app.mount()`. Because it's a full app rather than a router, it can hold its own `StaticFiles` mounts, middleware, exception handlers, and state — everything a router alone can't do.
+- **`make_router(worker_dir: Path) -> APIRouter`** *(preferred for simple interactivity)* — a factory function called once at Comb startup with the Worker folder path as an argument. Use this when your app needs to read Worker files but doesn't need its own static assets or middleware.
 - **`router: APIRouter`** — a bare `APIRouter` instance. In this case, locate the Worker folder yourself (e.g. `Path(__file__).resolve().parent.parent`).
 
 The app is served at `/workers/{name}/apps/{slug}`, where `slug` is derived from the cell title by lowercasing and replacing non-alphanumeric characters with hyphens (`"Browse Transactions"` → `"browse-transactions"`).
@@ -200,7 +201,49 @@ def make_router(worker_dir: Path) -> APIRouter:
 
 The router has access to the full FastAPI ecosystem — `Request`, `Form`, `HTMLResponse`, `JSONResponse`, `Jinja2Templates`, etc. Only packages installed in the Hive environment are available; Worker-specific `.venv` packages are not.
 
-> **Note:** App routers are mounted when the Comb server starts. After adding or changing an `app` cell, run `hive comb restart` for the change to take effect.
+**Serving a built frontend (e.g. React) via `make_app`:**
+
+```python
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+def make_app(worker_dir):
+    app = FastAPI()
+    app.mount("/", StaticFiles(directory=worker_dir / "dashboard" / "frontend" / "dist", html=True))
+    return app
+```
+
+Build your frontend (`npm run build` or equivalent) so `dashboard/frontend/dist` exists before starting Comb. To combine API routes with a served frontend, define the routes first and mount static files last (`/` matches anything not already handled by an earlier route):
+
+```python
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+def make_app(worker_dir):
+    app = FastAPI()
+
+    @app.get("/api/transactions")
+    async def transactions():
+        return {"items": [...]}
+
+    app.mount("/", StaticFiles(directory=worker_dir / "dashboard" / "frontend" / "dist", html=True))
+    return app
+```
+
+`make_app` can also wrap an **existing standalone FastAPI app** rather than one written from scratch — useful if you're turning an already-working project into a Worker. As long as the module you import has a lean import surface (only what it needs to serve the app, not an entire unrelated dependency tree), you can adopt its own app factory directly:
+
+```python
+from my_existing_project.web import create_app
+
+def make_app(worker_dir):
+    return create_app(worker_dir / "data" / "app.db", worker_dir / "config.json")
+```
+
+Before doing this: add the external package to **Hive's own project** (e.g. `uv add --editable ../my-existing-project` from the Hive repo), not the Worker's `.venv` — `make_app`/`make_router` code always runs inside the Comb process, using Hive's environment. Check that the package's own `fastapi`/`pydantic` (and other shared-surface package) version requirements are compatible with Hive's pins first; this isn't validated automatically. Prefer importing only the module that makes up the app's web surface (e.g. `web.py`) rather than the top-level package, so unrelated heavier dependencies used elsewhere in that project aren't forced into Hive's environment as transitive requirements.
+
+> **Important:** a sub-app's `lifespan=` context manager and `@app.on_event("startup"/"shutdown")` handlers **never run** when mounted via `app.mount()` — this is standard Starlette/FastAPI behavior, not specific to Comb. If the app you're wrapping opens a DB connection, HTTP client, or other resource into `app.state` at startup this way, that resource silently never gets created, and the first request will fail with an `AttributeError`/`None` rather than a clear startup error. Instead, initialize such resources eagerly at module import time (e.g. as part of `create_app`/`make_app` itself) or lazily on first use — not via `lifespan=`.
+
+> **Note:** App routers and apps are mounted when the Comb server starts. After adding or changing an `app` cell — or its underlying `make_app`/`make_router` code or static assets — run `hive comb restart` for the change to take effect.
 
 ## Directory Source Behavior
 

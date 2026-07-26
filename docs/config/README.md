@@ -145,6 +145,7 @@ Controls the Comb web dashboard at `<host>:8080/workers/<name>`.
 | `status` | Status value from a JSON file (requires `key`) |
 | `table` | Tabular data |
 | `chart` | Chart visualization |
+| `app` | Full interactive application, served from a Python file exporting `make_app`, `make_router`, or `router` — see `docs/dashboard/README.md` |
 
 ```toml
 [comb]

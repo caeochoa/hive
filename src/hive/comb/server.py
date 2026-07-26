@@ -68,7 +68,7 @@ def _title_to_slug(title: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
 
 
-def _load_app_router(source: Path, worker_dir: Path, worker_name: str):
+def _load_app_router(source: Path, worker_dir: Path, worker_name: str) -> tuple[str, object]:
     resolved = source.resolve()
     if not resolved.is_relative_to(worker_dir.resolve()):
         raise ValueError(f"source path escapes worker dir: {source}")
@@ -79,11 +79,13 @@ def _load_app_router(source: Path, worker_dir: Path, worker_name: str):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if hasattr(module, "make_app"):
+        return "app", module.make_app(worker_dir)
     if hasattr(module, "make_router"):
-        return module.make_router(worker_dir)
+        return "router", module.make_router(worker_dir)
     if hasattr(module, "router"):
-        return module.router
-    raise AttributeError(f"{source} must export 'router' or 'make_router'")
+        return "router", module.router
+    raise AttributeError(f"{source} must export 'router', 'make_router', or 'make_app'")
 
 
 _mounted_apps: set[tuple[str, str]] = set()
@@ -112,10 +114,13 @@ def _mount_worker_apps() -> None:
             source = cfg.worker_dir / cell.source
             prefix = f"/workers/{worker_name}/apps/{slug}"
             try:
-                router = _load_app_router(source, cfg.worker_dir, worker_name)
-                app.include_router(router, prefix=prefix)
+                kind, obj = _load_app_router(source, cfg.worker_dir, worker_name)
+                if kind == "app":
+                    app.mount(prefix, obj)
+                else:
+                    app.include_router(obj, prefix=prefix)
                 _mounted_apps.add((worker_name, slug))
-                logger.info("Mounted app router %s -> %s", cell.source, prefix)
+                logger.info("Mounted app %s %s -> %s", kind, cell.source, prefix)
             except Exception:
                 logger.warning(
                     "Failed to mount app router worker=%s cell=%r",
