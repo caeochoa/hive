@@ -54,6 +54,7 @@ def build_tui_session(config: WorkerConfig) -> _TuiSession:
         thinking_budget_tokens=config.agent_thinking_budget_tokens,
         tool_verbosity=config.agent_tool_verbosity,
         show_thinking=config.agent_show_thinking,
+        env=config.agent_env,
     )
     sessions_file = config.worker_dir / config.agent_memory_dir / ".sessions.json"
     agent = ClaudeAgentRunner(

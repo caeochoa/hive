@@ -12,13 +12,33 @@ Required. Never committed to git.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | Bot token from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_ALLOWED_USER_ID` | Yes | Your Telegram user ID. Comma-separated for multiple users: `12345,67890` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Recommended | Long-lived agent auth token from `claude setup-token` (billed to your Claude subscription). Forwarded to the agent subprocess. |
+| `ANTHROPIC_API_KEY` | No | Alternative agent auth via the Anthropic API (pay-per-token billing). Forwarded to the agent subprocess. |
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TELEGRAM_ALLOWED_USER_ID=123456789
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxxxxxxx
 ```
 
 To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot).
+
+**Why set an auth token?** Without one, the agent falls back to the interactive
+Claude Code OAuth credentials in `~/.claude/.credentials.json`. That access token
+expires 8 hours after your last interactive Claude Code session, and headless
+workers cannot refresh it — agents then fail with
+`401 Invalid authentication credentials` until Claude Code is opened again.
+Run `claude setup-token` once to mint a long-lived token (valid ~1 year), then
+store it with `hive auth`. Set only one of the two variables.
+
+### Global auth — `~/.config/hive/.env`
+
+Auth tokens usually don't need to be per-Worker. `hive auth` stores
+`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY` with `--api-key`) in the global
+Hive `.env` at `~/.config/hive/.env`, and every Worker picks it up automatically.
+Precedence: a key set in a Worker's own `.env` overrides the global value. Only
+these two auth keys are read from the global file — everything else in a Worker's
+`.env` (Telegram credentials, etc.) remains strictly per-Worker.
 
 ---
 

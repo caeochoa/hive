@@ -29,6 +29,17 @@ class WorkerConfig(BaseModel):
     schedule: list[ScheduleEntry] = []
     comb_cells: list[CombCell] = []
     comb_theme: str = "terminal-dark"
+    agent_env: dict[str, str] = {}
+
+
+# .env keys forwarded to the agent subprocess. Without one of these, the agent
+# falls back to the interactive Claude Code OAuth token, which expires after 8h
+# and cannot be refreshed headlessly.
+AGENT_ENV_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
+
+# Hive-level .env (written by `hive auth`). Auth keys set here apply to every
+# Worker; a Worker's own .env overrides them.
+GLOBAL_ENV_PATH = Path.home() / ".config" / "hive" / ".env"
 
 
 def _parse_allowed_ids(raw: str) -> list[int]:
@@ -61,6 +72,16 @@ def _parse_worker_toml(worker_dir: Path) -> tuple[dict[str, str], dict, dict, li
     return env, worker_section, agent_section, schedule_raw, comb_raw, comb_theme
 
 
+def resolve_agent_env(worker_env: dict[str, str | None]) -> dict[str, str]:
+    """Allowlisted auth vars for the agent subprocess: global .env, then worker .env."""
+    global_env = dotenv_values(GLOBAL_ENV_PATH) if GLOBAL_ENV_PATH.exists() else {}
+    return {
+        k: v
+        for k in AGENT_ENV_KEYS
+        if (v := worker_env.get(k) or global_env.get(k))
+    }
+
+
 def _build_worker_config(
     worker_dir: Path,
     token: str,
@@ -70,7 +91,9 @@ def _build_worker_config(
     schedule_raw: list,
     comb_raw: list,
     comb_theme: str,
+    env: dict[str, str | None] | None = None,
 ) -> WorkerConfig:
+    env = env or {}
     return WorkerConfig(
         name=worker_section["name"],
         worker_dir=worker_dir,
@@ -86,6 +109,7 @@ def _build_worker_config(
         schedule=[ScheduleEntry(**s) for s in schedule_raw],
         comb_cells=[CombCell(**c) for c in comb_raw],
         comb_theme=comb_theme,
+        agent_env=resolve_agent_env(env),
     )
 
 
@@ -108,6 +132,7 @@ def load_worker_config_for_tui(worker_dir: Path) -> WorkerConfig:
     return _build_worker_config(
         worker_dir, token, allowed_ids,
         worker_section, agent_section, schedule_raw, comb_raw, comb_theme,
+        env=env,
     )
 
 
@@ -127,4 +152,5 @@ def load_worker_config(worker_dir: Path) -> WorkerConfig:
     return _build_worker_config(
         worker_dir, token, _parse_allowed_ids(allowed_id),
         worker_section, agent_section, schedule_raw, comb_raw, comb_theme,
+        env=env,
     )

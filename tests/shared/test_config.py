@@ -1,8 +1,18 @@
 import pytest
 from pathlib import Path
+
+import hive.shared.config
 from hive.shared.config import load_worker_config, load_worker_config_for_tui, ConfigError
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def isolated_global_env(tmp_path, monkeypatch):
+    """Keep tests independent of the developer's real ~/.config/hive/.env."""
+    path = tmp_path / "global.env"
+    monkeypatch.setattr(hive.shared.config, "GLOBAL_ENV_PATH", path)
+    return path
 
 
 def test_load_valid_config():
@@ -58,6 +68,60 @@ def test_minimal_config_with_env(tmp_path):
     assert config.comb_cells == []
     assert config.agent_model == "claude-haiku-4-5"
     assert config.agent_max_turns == 10
+
+
+def test_agent_env_empty_by_default(tmp_path):
+    """agent_env is empty when .env has no auth keys."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {}
+
+
+def test_agent_env_forwards_auth_keys_only(tmp_path):
+    """Auth keys land in agent_env; Telegram secrets do not."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=tok\n"
+        "TELEGRAM_ALLOWED_USER_ID=1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=oat-123\n"
+        "ANTHROPIC_API_KEY=sk-456\n"
+    )
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "oat-123",
+        "ANTHROPIC_API_KEY": "sk-456",
+    }
+
+
+def test_agent_env_in_tui_config(tmp_path):
+    """The TUI loader forwards auth keys too."""
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("CLAUDE_CODE_OAUTH_TOKEN=oat-123\n")
+    config = load_worker_config_for_tui(tmp_path)
+    assert config.agent_env == {"CLAUDE_CODE_OAUTH_TOKEN": "oat-123"}
+
+
+def test_agent_env_falls_back_to_global(tmp_path, isolated_global_env):
+    """Auth keys in the global Hive .env apply when the worker .env has none."""
+    isolated_global_env.write_text("CLAUDE_CODE_OAUTH_TOKEN=global-oat\n")
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n")
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {"CLAUDE_CODE_OAUTH_TOKEN": "global-oat"}
+
+
+def test_agent_env_worker_overrides_global(tmp_path, isolated_global_env):
+    """A worker's own .env auth key wins over the global one."""
+    isolated_global_env.write_text("CLAUDE_CODE_OAUTH_TOKEN=global-oat\n")
+    (tmp_path / "hive.toml").write_text('[worker]\nname = "t"\n')
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=tok\n"
+        "TELEGRAM_ALLOWED_USER_ID=1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=worker-oat\n"
+    )
+    config = load_worker_config(tmp_path)
+    assert config.agent_env == {"CLAUDE_CODE_OAUTH_TOKEN": "worker-oat"}
 
 
 def test_thinking_budget_tokens_default(tmp_path):

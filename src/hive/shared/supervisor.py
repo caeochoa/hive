@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+import getpass
 import os
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 DEFAULT_CONF_DIR = Path.home() / ".config" / "hive" / "supervisord" / "conf.d"
 SUPERVISORD_CONF = Path.home() / ".config" / "hive" / "supervisord" / "supervisord.conf"
 LAUNCHAGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.hive.supervisord.plist"
+LAUNCHDAEMON_PLIST = Path("/Library/LaunchDaemons/com.hive.supervisord.plist")
+# User-writable staging copy; sudo-installed to LAUNCHDAEMON_PLIST by `hive boot enable`
+LAUNCHDAEMON_STAGED = (
+    Path.home() / ".config" / "hive" / "supervisord" / "com.hive.supervisord.daemon.plist"
+)
+
+LAUNCHD_LABEL = "com.hive.supervisord"
+
+# Callable that runs a command under sudo (injected by the CLI layer, which owns
+# the TTY/password-prompt policy).
+RunSudo = Callable[[list[str]], subprocess.CompletedProcess]
 
 SUPERVISORD_CONF_TEMPLATE = """\
 [supervisord]
@@ -70,6 +84,51 @@ LAUNCHAGENT_TEMPLATE = """\
   <true/>
   <key>KeepAlive</key>
   <true/>
+</dict>
+</plist>
+"""
+
+# launchd does not set HOME/USER/LOGNAME for UserName-scoped daemons; child
+# processes (git, claude, worker scripts) need them, so they are baked in.
+LAUNCHDAEMON_TEMPLATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hive.supervisord</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{supervisord}</string>
+    <string>-c</string>
+    <string>{conf}</string>
+  </array>
+  <key>UserName</key>
+  <string>{username}</string>
+  <key>WorkingDirectory</key>
+  <string>{home}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>{home}</string>
+    <key>USER</key>
+    <string>{username}</string>
+    <key>LOGNAME</key>
+    <string>{username}</string>
+    <key>PATH</key>
+    <string>{path}</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>{home}/.config/hive/supervisord/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{home}/.config/hive/supervisord/launchd.err.log</string>
 </dict>
 </plist>
 """
@@ -169,3 +228,98 @@ def reload_supervisord() -> None:
     """Signal supervisord to reread and update config."""
     supervisorctl("reread")
     supervisorctl("update")
+
+
+def render_launchdaemon_plist() -> str:
+    """Render the LaunchDaemon plist for the current user and environment."""
+    supervisord_bin = shutil.which("supervisord")
+    if not supervisord_bin:
+        raise RuntimeError("supervisord not found in PATH")
+    return LAUNCHDAEMON_TEMPLATE.format(
+        supervisord=supervisord_bin,
+        conf=str(SUPERVISORD_CONF),
+        username=getpass.getuser(),
+        home=str(Path.home()),
+        path=os.environ.get("PATH", ""),
+    )
+
+
+def is_launchdaemon_installed() -> bool:
+    """Check if the boot-time LaunchDaemon plist is installed.
+
+    File-existence only: `launchctl print system/...` behaves inconsistently
+    for non-root users across macOS versions, so runtime state is not queried here.
+    """
+    return LAUNCHDAEMON_PLIST.exists()
+
+
+def is_boot_config_installed() -> bool:
+    """True if supervisord is set up to start via launchd (daemon or agent)."""
+    return is_launchdaemon_installed() or is_launchagent_installed()
+
+
+def _wait_for_supervisord_exit(timeout: float = 10.0) -> None:
+    """Wait for the running supervisord to release its pidfile.
+
+    Prevents an old instance racing a newly bootstrapped one on the same
+    pidfile/socket while launchd KeepAlive relaunches it.
+    """
+    pidfile = SUPERVISORD_CONF.parent / "supervisord.pid"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            pid = int(pidfile.read_text().strip())
+            os.kill(pid, 0)
+        except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+            return
+        time.sleep(0.2)
+
+
+def uninstall_launchagent() -> None:
+    """Unload and remove the login-time LaunchAgent, waiting for supervisord to exit."""
+    subprocess.run(
+        ["launchctl", "bootout", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"],
+        capture_output=True,
+    )
+    if LAUNCHAGENT_PLIST.exists():
+        # Fallback for launchctl versions without bootout; harmless no-op otherwise
+        subprocess.run(
+            ["launchctl", "unload", "-w", str(LAUNCHAGENT_PLIST)], capture_output=True
+        )
+        LAUNCHAGENT_PLIST.unlink()
+    _wait_for_supervisord_exit()
+
+
+def install_launchdaemon(run_sudo: RunSudo) -> None:
+    """Install supervisord as a boot-time LaunchDaemon, migrating off the LaunchAgent."""
+    LAUNCHDAEMON_STAGED.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCHDAEMON_STAGED.write_text(render_launchdaemon_plist())
+
+    uninstall_launchagent()
+
+    # Idempotent re-install: bootstrap fails with EEXIST if already loaded
+    run_sudo(["launchctl", "bootout", f"system/{LAUNCHD_LABEL}"])
+    # launchd rejects daemon plists not owned root:wheel with mode <=644,
+    # so set ownership and mode atomically rather than cp + chown
+    result = run_sudo(
+        [
+            "install", "-o", "root", "-g", "wheel", "-m", "644",
+            str(LAUNCHDAEMON_STAGED), str(LAUNCHDAEMON_PLIST),
+        ]
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"failed to install {LAUNCHDAEMON_PLIST} (exit {result.returncode})")
+    result = run_sudo(["launchctl", "bootstrap", "system", str(LAUNCHDAEMON_PLIST)])
+    if result.returncode != 0:
+        # Fallback for launchctl versions without bootstrap
+        result = run_sudo(["launchctl", "load", "-w", str(LAUNCHDAEMON_PLIST)])
+        if result.returncode != 0:
+            raise RuntimeError(f"launchctl bootstrap failed (exit {result.returncode})")
+    run_sudo(["launchctl", "enable", f"system/{LAUNCHD_LABEL}"])
+
+
+def uninstall_launchdaemon(run_sudo: RunSudo) -> None:
+    """Remove the boot-time LaunchDaemon, waiting for supervisord to exit."""
+    run_sudo(["launchctl", "bootout", f"system/{LAUNCHD_LABEL}"])
+    run_sudo(["rm", "-f", str(LAUNCHDAEMON_PLIST)])
+    _wait_for_supervisord_exit()
