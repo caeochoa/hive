@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import html
+import logging
 import re
 from contextlib import asynccontextmanager, suppress
 
 import mistune
 from mistune.plugins.formatting import strikethrough as _strikethrough_plugin
 from telegram.error import BadRequest
+
+logger = logging.getLogger(__name__)
 
 
 class _TelegramHTMLRenderer(mistune.HTMLRenderer):
@@ -70,7 +73,10 @@ async def typing_action(bot, chat_id: int):
 
     async def _keep_typing():
         while True:
-            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                logger.debug("typing ping failed", exc_info=True)
             await asyncio.sleep(4)  # refresh before Telegram's ~5s expiry
 
     task = asyncio.create_task(_keep_typing())
