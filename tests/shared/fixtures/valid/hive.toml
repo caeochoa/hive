@@ -1,5 +1,6 @@
 [worker]
 name = "budget"
+hive_version = "0.1.0b1"
 
 [agent]
 model = "claude-haiku-4-5"

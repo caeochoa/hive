@@ -51,10 +51,12 @@ The main configuration file. Safe to commit. Contains no secrets.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Worker identifier. Used in supervisord process names and Comb dashboard URLs (`/workers/<name>`) |
+| `hive_version` | string | Auto | Hive version this Worker was scaffolded against. Set automatically by `hive init`; do not edit by hand. Used by `hive update` to report drift — see [Versioning](../reference/versioning.md) |
 
 ```toml
 [worker]
 name = "budget"
+hive_version = "0.1.0b1"
 ```
 
 ---
