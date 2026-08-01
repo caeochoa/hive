@@ -138,6 +138,8 @@ What it does:
 
 Workers created before this feature existed have no `hive_version` field; `update` treats these as an unknown baseline and shows full changelog history.
 
+For source/editable installs, the changelog is read straight from disk (no network). For other installs (e.g. via `uv tool install`), Hive doesn't ship `CHANGELOG.md` in the package, so `update` makes a single read-only HTTPS request to fetch it from `raw.githubusercontent.com/caeochoa/hive` (3s timeout); if that fails or you're offline, it prints a link instead.
+
 ```bash
 hive update ~/workers/my-bot
 ```

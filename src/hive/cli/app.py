@@ -400,6 +400,11 @@ def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> Non
             installed_v = Version(__version__)
         except InvalidVersion:
             worker_v = installed_v = None
+            typer.echo(
+                f"Warning: could not compare '{worker_version}' and '{__version__}' as versions "
+                "— skipping drift check.",
+                err=True,
+            )
 
         if worker_v is not None and installed_v is not None:
             if worker_v == installed_v:

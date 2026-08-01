@@ -55,6 +55,10 @@ def entries_between(
     and including to_version is returned. Headers that aren't valid PEP 440
     versions (e.g. "Unreleased") are skipped unless include_unreleased and the
     header text is literally "Unreleased".
+
+    Filters `entries` in place without re-sorting: the result preserves
+    `entries`' original order, which is only newest-first if the input
+    (e.g. from `parse_changelog`) already is, per Keep a Changelog convention.
     """
     try:
         to_v = Version(to_version)

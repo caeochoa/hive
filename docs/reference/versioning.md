@@ -45,3 +45,7 @@ _Last updated: 2026-08-01_
   management config (supervisord, LaunchAgent/LaunchDaemon) and never looks
   at a Worker's `hive.toml`; `update` only reports Hive version drift for a
   single Worker and never touches process config.
+- `hive update` may make a single outbound HTTPS request (to fetch
+  `CHANGELOG.md` from GitHub) when running from a non-source install that
+  doesn't have the file on disk. It never sends any Worker data — only a
+  read-only fetch of the public changelog file.

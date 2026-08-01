@@ -391,6 +391,32 @@ class TestUpdate:
         assert result.exit_code == 0
         assert "github.com" in result.output
 
+    def test_update_worker_ahead_of_installed(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "test"\nhive_version = "9.9.9"\n')
+        with (
+            patch("hive.shared.changelog.find_changelog_text", return_value=None),
+            patch("hive.__version__", "0.1.0b1"),
+        ):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "newer than the installed Hive" in result.output
+
+    def test_update_unparseable_versions_warns_and_skips_drift(self, tmp_path):
+        (tmp_path / "hive.toml").write_text(
+            '[worker]\nname = "test"\nhive_version = "not-a-version"\n'
+        )
+        with (
+            patch("hive.shared.changelog.find_changelog_text", return_value=None),
+            patch("hive.__version__", "also-not-a-version"),
+        ):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "could not compare" in result.output
+        assert "up to date" not in result.output
+        assert "behind" not in result.output
+
 
 class TestBoot:
     def test_boot_enable_non_tty_prints_instructions(self):
