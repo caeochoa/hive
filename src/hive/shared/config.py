@@ -16,6 +16,7 @@ class ConfigError(Exception):
 
 class WorkerConfig(BaseModel):
     name: str
+    hive_version: str | None = None
     worker_dir: Path
     telegram_bot_token: str
     telegram_allowed_user_ids: list[int]
@@ -96,6 +97,7 @@ def _build_worker_config(
     env = env or {}
     return WorkerConfig(
         name=worker_section["name"],
+        hive_version=worker_section.get("hive_version"),
         worker_dir=worker_dir,
         telegram_bot_token=token,
         telegram_allowed_user_ids=allowed_ids,

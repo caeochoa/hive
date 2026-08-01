@@ -14,6 +14,7 @@ app = typer.Typer(name="hive", help="Hive — local-first Telegram bot framework
 HIVE_TOML_TEMPLATE = """\
 [worker]
 name = "{name}"
+hive_version = "{hive_version}"
 
 [agent]
 model = "claude-haiku-4-5"
@@ -52,6 +53,7 @@ REQUIREMENTS_TEMPLATE = """\
 @app.command()
 def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> None:
     """Scaffold a new Worker folder. Register with supervisord. Install LaunchAgent + Comb on first use."""
+    from hive import __version__
     from hive.shared.registry import HiveRegistry
     from hive.shared.supervisor import (
         ensure_supervisord_conf,
@@ -96,7 +98,10 @@ def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> Non
         )
 
     # Write template files (skip if exist)
-    _write_if_missing(worker_dir / "hive.toml", HIVE_TOML_TEMPLATE.format(name=name))
+    _write_if_missing(
+        worker_dir / "hive.toml",
+        HIVE_TOML_TEMPLATE.format(name=name, hive_version=__version__),
+    )
     _write_if_missing(worker_dir / ".env", ENV_TEMPLATE)
     _write_if_missing(worker_dir / "requirements.txt", REQUIREMENTS_TEMPLATE)
     _write_if_missing(worker_dir / ".gitignore", GITIGNORE_TEMPLATE)
@@ -345,6 +350,84 @@ def upgrade() -> None:
 
     reload_supervisord()
     typer.echo("Done. Run 'hive status' to verify.")
+
+
+@app.command()
+def version() -> None:
+    """Print the installed Hive version."""
+    from hive import __version__
+
+    typer.echo(__version__)
+
+
+@app.command()
+def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
+    """Report what's changed in Hive since this Worker was scaffolded.
+
+    Read-only — never modifies the Worker. Unrelated to `hive upgrade`, which
+    re-applies process manager (supervisord/LaunchAgent) configuration.
+    """
+    from hive import __version__
+    from hive.shared.changelog import (
+        GITHUB_CHANGELOG_URL,
+        entries_between,
+        find_changelog_text,
+        parse_changelog,
+    )
+    from hive.shared.config import ConfigError, load_worker_config_for_tui
+    from packaging.version import InvalidVersion, Version
+
+    worker_dir = Path(path).resolve()
+
+    try:
+        config = load_worker_config_for_tui(worker_dir)
+    except ConfigError as e:
+        typer.echo(f"Config error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    worker_version = config.hive_version
+    typer.echo(f"Installed Hive version: {__version__}")
+
+    if worker_version is None:
+        typer.echo(
+            f"Worker '{config.name}' has no recorded hive_version "
+            "(scaffolded before version stamping was introduced) — treating as unknown baseline."
+        )
+    else:
+        typer.echo(f"Worker '{config.name}' scaffolded against: {worker_version}")
+        try:
+            worker_v = Version(worker_version)
+            installed_v = Version(__version__)
+        except InvalidVersion:
+            worker_v = installed_v = None
+
+        if worker_v is not None and installed_v is not None:
+            if worker_v == installed_v:
+                typer.echo("Worker is up to date with the installed Hive version.")
+            elif worker_v > installed_v:
+                typer.echo(
+                    "Worker's recorded hive_version is newer than the installed Hive "
+                    "(unusual — was it edited manually, or did you downgrade Hive?)."
+                )
+            else:
+                typer.echo("Worker is behind the installed Hive version.")
+
+    changelog_text = find_changelog_text()
+    if changelog_text is None:
+        typer.echo(f"\nCHANGELOG.md not available locally — see {GITHUB_CHANGELOG_URL}")
+        return
+
+    relevant = entries_between(parse_changelog(changelog_text), worker_version, __version__)
+    if not relevant:
+        typer.echo("\nNo recorded changes between these versions.")
+        return
+
+    typer.echo("\nChanges since this Worker was scaffolded:\n")
+    for entry in relevant:
+        header = f"## [{entry.version}]" + (f" - {entry.date}" if entry.date else "")
+        typer.echo(header)
+        typer.echo(entry.body)
+        typer.echo("")
 
 
 def _upsert_env_var(path: Path, key: str, value: str) -> None:

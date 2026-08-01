@@ -85,6 +85,14 @@ hive status
 
 Output is the raw `supervisorctl status` output. Each line shows the process name, state (RUNNING, STOPPED, FATAL, etc.), and uptime.
 
+## `hive version`
+
+Print the installed Hive version.
+
+```
+hive version
+```
+
 ## `hive upgrade`
 
 Re-apply all process management configuration for the current installation. Run this after upgrading Hive, or if Workers fail to start after a system reboot.
@@ -113,6 +121,28 @@ hive status   # verify all workers are RUNNING
 ```
 
 If the problem is that Workers only come back *after you log in*, that's the LaunchAgent working as designed — use `hive boot enable` to start them at boot instead.
+
+## `hive update <path>`
+
+Report what's changed in Hive since a specific Worker was scaffolded. Read-only — never modifies the Worker's `hive.toml` or any other file. **Not the same as `hive upgrade`**: `upgrade` re-applies process management config across all Workers; `update` reports Hive version drift for one Worker by reading its `hive.toml`.
+
+```
+hive update <path>
+```
+
+What it does:
+
+1. Reads the Worker's `[worker] hive_version` field (the Hive version it was scaffolded against, stamped by `hive init`).
+2. Compares it to the currently installed Hive version.
+3. Prints the relevant `CHANGELOG.md` entries between those two versions, if the changelog is available (falls back to a link if it isn't — e.g. for some non-source installs).
+
+Workers created before this feature existed have no `hive_version` field; `update` treats these as an unknown baseline and shows full changelog history.
+
+```bash
+hive update ~/workers/my-bot
+```
+
+See [Versioning](../reference/versioning.md) for the full convention.
 
 ## `hive boot enable|disable|status`
 

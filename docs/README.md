@@ -23,6 +23,7 @@
 
 - [Spec](reference/SPEC.md) — What Hive is, vocabulary, design philosophy
 - [Architecture](reference/architecture.md) — Implementation details for contributors
+- [Versioning](reference/versioning.md) — Hive/Worker version conventions, changelog policy
 
 ## Claude Code Skills
 

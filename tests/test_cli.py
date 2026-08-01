@@ -329,6 +329,69 @@ class TestUpgrade:
         mock_install.assert_not_called()
 
 
+class TestVersion:
+    def test_version_prints_installed_version(self):
+        from hive import __version__
+
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+        assert __version__ in result.output
+
+
+class TestUpdate:
+    def test_update_fails_on_bad_config(self, tmp_path):
+        result = runner.invoke(app, ["update", str(tmp_path)])
+        assert result.exit_code == 1
+
+    def test_update_up_to_date(self, tmp_path):
+        from hive import __version__
+
+        (tmp_path / "hive.toml").write_text(
+            f'[worker]\nname = "test"\nhive_version = "{__version__}"\n'
+        )
+        with patch("hive.shared.changelog.find_changelog_text", return_value=None):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "up to date" in result.output
+
+    def test_update_behind_lists_changelog_entries(self, tmp_path):
+        (tmp_path / "hive.toml").write_text(
+            '[worker]\nname = "test"\nhive_version = "0.0.1"\n'
+        )
+        changelog = (
+            "## [Unreleased]\n\nnope\n\n"
+            "## [0.2.0] - 2026-06-01\n\nFeature C.\n\n"
+            "## [0.0.1] - 2026-01-01\n\nInitial.\n"
+        )
+        with (
+            patch("hive.shared.changelog.find_changelog_text", return_value=changelog),
+            patch("hive.__version__", "0.2.0"),
+        ):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "behind" in result.output
+        assert "Feature C." in result.output
+        assert "nope" not in result.output
+
+    def test_update_pre_versioning_worker(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "test"\n')
+        with patch("hive.shared.changelog.find_changelog_text", return_value=None):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "no recorded hive_version" in result.output
+
+    def test_update_no_changelog_prints_link(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "test"\nhive_version = "0.0.1"\n')
+        with patch("hive.shared.changelog.find_changelog_text", return_value=None):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "github.com" in result.output
+
+
 class TestBoot:
     def test_boot_enable_non_tty_prints_instructions(self):
         with patch("hive.cli.app._stdin_is_tty", return_value=False):

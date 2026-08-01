@@ -22,6 +22,16 @@ def test_load_valid_config():
     assert config.telegram_allowed_user_ids == [999888]
 
 
+def test_hive_version_present():
+    config = load_worker_config(FIXTURES / "valid")
+    assert config.hive_version == "0.1.0b1"
+
+
+def test_hive_version_absent_defaults_to_none():
+    config = load_worker_config_for_tui(FIXTURES / "minimal")
+    assert config.hive_version is None
+
+
 def test_load_agent_config():
     config = load_worker_config(FIXTURES / "valid")
     assert config.agent_model == "claude-haiku-4-5"
