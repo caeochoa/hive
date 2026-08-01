@@ -367,6 +367,8 @@ def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> Non
     Read-only — never modifies the Worker. Unrelated to `hive upgrade`, which
     re-applies process manager (supervisord/LaunchAgent) configuration.
     """
+    from packaging.version import InvalidVersion, Version
+
     from hive import __version__
     from hive.shared.changelog import (
         GITHUB_CHANGELOG_URL,
@@ -375,7 +377,6 @@ def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> Non
         parse_changelog,
     )
     from hive.shared.config import ConfigError, load_worker_config_for_tui
-    from packaging.version import InvalidVersion, Version
 
     worker_dir = Path(path).resolve()
 
