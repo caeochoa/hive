@@ -395,7 +395,7 @@ class ClaudeAgentRunner(AgentRunner):
                 "allowed_tools": [
                     "Read", "Write", "Bash", "Glob",
                     *self._command_names,
-                    *(["set_session_config"] if self._builtins_mcp is not None else []),
+                    *(["set_session_config", "write_page"] if self._builtins_mcp is not None else []),
                 ],
                 "permission_mode": "bypassPermissions",
                 "cwd": str(self._worker_dir),

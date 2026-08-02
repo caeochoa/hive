@@ -45,25 +45,27 @@ def test_build_builtin_mcp_server_returns_dict():
 
 
 def _get_handler(runner):
-    """Re-build the server and extract the handler via SdkMcpTool inspection."""
-    import importlib
+    """Re-build the server and extract the set_session_config handler by name.
+
+    The server now registers multiple tools, so handlers are captured by
+    name rather than by "last SdkMcpTool call wins".
+    """
     import hive.worker.builtin_tools as bt_module
 
-    # Re-import to get a fresh handler closure bound to our runner.
-    # We monkey-patch the module's SdkMcpTool to capture the handler.
-    captured = {}
+    captured: dict[str, object] = {}
 
-    original_sdk = sys.modules.get("claude_agent_sdk")
+    def _capture(name, description, input_schema, handler):
+        captured[name] = handler
+        return MagicMock()
+
     mock_sdk = MagicMock()
-    mock_sdk.SdkMcpTool.side_effect = lambda name, description, input_schema, handler: (
-        captured.__setitem__("handler", handler) or MagicMock()
-    )
+    mock_sdk.SdkMcpTool.side_effect = _capture
     mock_sdk.create_sdk_mcp_server.return_value = {"type": "sdk", "name": "builtins", "instance": MagicMock()}
 
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         bt_module.build_builtin_mcp_server(runner)
 
-    return captured["handler"]
+    return captured["set_session_config"]
 
 
 @pytest.mark.asyncio
@@ -157,3 +159,65 @@ async def test_set_session_config_none_values_ignored():
 
     # Only max_turns should be passed, model=None is skipped
     runner.set_session_override.assert_called_once_with(88, max_turns=5)
+
+
+# ------------------------------------------------------------------ #
+# write_page_handler
+# ------------------------------------------------------------------ #
+
+
+def _get_write_page_handler(runner):
+    """Re-build the server, capturing every SdkMcpTool's handler by name."""
+    import hive.worker.builtin_tools as bt_module
+
+    captured: dict[str, object] = {}
+
+    def _capture(name, description, input_schema, handler):
+        captured[name] = handler
+        return MagicMock()
+
+    mock_sdk = MagicMock()
+    mock_sdk.SdkMcpTool.side_effect = _capture
+    mock_sdk.create_sdk_mcp_server.return_value = {"type": "sdk", "name": "builtins", "instance": MagicMock()}
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        bt_module.build_builtin_mcp_server(runner)
+
+    return captured["write_page"]
+
+
+@pytest.mark.asyncio
+async def test_write_page_handler_calls_knowledge_write_page(tmp_path):
+    """Handler delegates to knowledge.write_page with the runner's memory_dir."""
+    runner = _make_runner()
+    runner.memory_dir = tmp_path
+    handler = _get_write_page_handler(runner)
+
+    result = await handler({
+        "slug": "thompson-thesis",
+        "title": "Thompson's Thesis",
+        "summary": "Evolving view on X",
+        "content": "# Body",
+    })
+
+    assert result.get("is_error") is not True
+    assert (tmp_path / "notes" / "thompson-thesis.md").read_text() == "# Body"
+    assert "thompson-thesis" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_write_page_handler_invalid_slug_returns_error(tmp_path):
+    """Handler surfaces knowledge.write_page's ValueError as an MCP error result, not an exception."""
+    runner = _make_runner()
+    runner.memory_dir = tmp_path
+    handler = _get_write_page_handler(runner)
+
+    result = await handler({
+        "slug": "../escape",
+        "title": "Title",
+        "summary": "Summary",
+        "content": "body",
+    })
+
+    assert result.get("is_error") is True
+    assert not (tmp_path / "notes").exists()
