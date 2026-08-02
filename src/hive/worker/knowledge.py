@@ -29,7 +29,7 @@ def append_log(memory_dir: Path, entry_type: str, detail: str) -> None:
     memory_dir.mkdir(parents=True, exist_ok=True)
 
     if not log_path.exists():
-        log_path.write_text(_LOG_HEADER + "\n")
+        log_path.write_text(_LOG_HEADER + "\n", encoding="utf-8")
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with log_path.open("a", encoding="utf-8") as f:
@@ -51,10 +51,26 @@ def write_page(memory_dir: Path, slug: str, title: str, summary: str, content: s
 
     notes_dir = memory_dir / "notes"
     notes_dir.mkdir(parents=True, exist_ok=True)
-    (notes_dir / f"{slug}.md").write_text(content)
+    (notes_dir / f"{slug}.md").write_text(content, encoding="utf-8")
 
     _upsert_index(memory_dir, slug, title, summary)
     append_log(memory_dir, "note", f"{slug} — {title}")
+
+
+def _sanitize_index_field(value: str, *, strip_brackets: bool = False) -> str:
+    """Collapse embedded newlines (and CRs) to spaces so a value can never
+    make an index.md entry span more than one physical line.
+
+    If strip_brackets is set, ']' is also removed: that character sits right
+    inside the markdown link's `[title]` text, and a stray ']' there would
+    prematurely close the link and corrupt the rendered syntax. summary sits
+    outside the `[]()` construct so a ']' there doesn't break parsing, but we
+    still collapse its newlines for the same one-line-per-entry guarantee.
+    """
+    sanitized = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    if strip_brackets:
+        sanitized = sanitized.replace("]", "")
+    return sanitized
 
 
 def _upsert_index(memory_dir: Path, slug: str, title: str, summary: str) -> None:
@@ -62,10 +78,12 @@ def _upsert_index(memory_dir: Path, slug: str, title: str, summary: str) -> None
     index_path = memory_dir / "index.md"
     link_marker = f"](notes/{slug}.md)"
     date = datetime.now().strftime("%Y-%m-%d")
-    new_line = f"- [{title}](notes/{slug}.md) — {summary} _(updated: {date})_\n"
+    safe_title = _sanitize_index_field(title, strip_brackets=True)
+    safe_summary = _sanitize_index_field(summary)
+    new_line = f"- [{safe_title}](notes/{slug}.md) — {safe_summary} _(updated: {date})_\n"
 
     if index_path.exists():
-        lines = index_path.read_text().splitlines(keepends=True)
+        lines = index_path.read_text(encoding="utf-8").splitlines(keepends=True)
     else:
         lines = [_INDEX_HEADER, "\n"]
 
@@ -78,4 +96,4 @@ def _upsert_index(memory_dir: Path, slug: str, title: str, summary: str) -> None
             lines[-1] += "\n"
         lines.append(new_line)
 
-    index_path.write_text("".join(lines))
+    index_path.write_text("".join(lines), encoding="utf-8")

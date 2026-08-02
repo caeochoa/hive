@@ -113,3 +113,64 @@ def test_write_page_rejects_slug_with_slash(tmp_path: Path) -> None:
 def test_write_page_rejects_uppercase_slug(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="slug"):
         write_page(tmp_path, "Thompson", "Title", "Summary", "body")
+
+
+# ------------------------------------------------------------------ #
+# _upsert_index sanitization (title/summary with newlines or ']')
+# ------------------------------------------------------------------ #
+
+
+def test_write_page_sanitizes_newline_in_title_and_summary(tmp_path: Path) -> None:
+    """A newline embedded in title/summary must not split the entry across
+    physical lines — otherwise a later upsert for the same slug would only
+    replace the first physical line, leaving orphaned fragments behind."""
+    write_page(
+        tmp_path,
+        "a",
+        "Title\nWith Newline",
+        "Summary\nWith Newline",
+        "body",
+    )
+
+    lines = (tmp_path / "index.md").read_text().splitlines()
+    entry_start_lines = [ln for ln in lines if ln.startswith("- [")]
+    assert len(entry_start_lines) == 1
+    entry_lines = [ln for ln in lines if "](notes/a.md)" in ln]
+    assert len(entry_lines) == 1
+    # The whole entry (link + summary + date) must be on that one line.
+    assert "_(updated:" in entry_lines[0]
+
+    # Re-upsert the same slug; must still find and replace exactly one line,
+    # with no orphaned fragments left behind from the first write.
+    write_page(
+        tmp_path,
+        "a",
+        "Title\nWith Newline v2",
+        "Summary\nWith Newline v2",
+        "body v2",
+    )
+    lines = (tmp_path / "index.md").read_text().splitlines()
+    entry_start_lines = [ln for ln in lines if ln.startswith("- [")]
+    assert len(entry_start_lines) == 1
+    entry_lines = [ln for ln in lines if "](notes/a.md)" in ln]
+    assert len(entry_lines) == 1
+    assert "v2" in entry_lines[0]
+    assert "_(updated:" in entry_lines[0]
+
+
+def test_write_page_sanitizes_bracket_in_title(tmp_path: Path) -> None:
+    """A literal ']' in title must not break the markdown link syntax."""
+    write_page(tmp_path, "a", "Foo] bar", "Some summary", "body")
+
+    index_text = (tmp_path / "index.md").read_text()
+    lines = index_text.splitlines()
+    entry_lines = [ln for ln in lines if "](notes/a.md)" in ln]
+    assert len(entry_lines) == 1
+
+    line = entry_lines[0]
+    # The link text (between '- [' and the final '](notes/a.md)') must not
+    # contain a stray ']' that would prematurely close the link.
+    assert line.startswith("- [")
+    link_text_end = line.index("](notes/a.md)")
+    link_text = line[len("- [") : link_text_end]
+    assert "]" not in link_text
