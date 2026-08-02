@@ -126,6 +126,8 @@ class WorkerScheduler:
                 async for chunk in self._agent.stream(
                     prompt, chat_id=user_id, worker_dir=self._config.worker_dir
                 ):
+                    if not chunk.text:
+                        continue  # metadata-only chunk (e.g. tool_verbosity="none"); nothing to send
                     await send_long_message((self._bot, user_id), chunk.to_telegram_html(), parse_mode="HTML")
                     chunk_count += 1
                 logger.info(
