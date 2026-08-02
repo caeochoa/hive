@@ -15,6 +15,7 @@ from telegram.ext import CommandHandler, ContextTypes
 
 from hive.shared.config import WorkerConfig
 from hive.shared.models import CommandArg, CommandMeta
+from hive.worker.knowledge import append_log
 from hive.worker.utils import md_to_telegram_html, send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,11 @@ class CommandRegistry:
 
         result = stdout.decode("utf-8", errors="replace")
         logger.info("Command %r returned %d chars", meta.name, len(result))
+
+        arg_summary = " ".join(f"{k}={v}" for k, v in args.items())
+        detail = f"{meta.name} {arg_summary}" if arg_summary else meta.name
+        append_log(self._config.worker_dir / self._config.agent_memory_dir, "command", detail)
+
         return result
 
     def telegram_handlers(self) -> list[CommandHandler]:

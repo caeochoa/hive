@@ -203,6 +203,44 @@ class TestExecute:
 
 
 # ---------------------------------------------------------------------------
+# execute: logging
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteLogsCommand:
+    async def test_execute_appends_log_entry_on_success(self, registry: CommandRegistry, worker_dir: Path) -> None:
+        meta = registry._parse_script(worker_dir / "commands" / "greet.py")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"Hello, Ada!\n", b"")
+        mock_proc.returncode = 0
+
+        with patch("hive.worker.commands.asyncio.create_subprocess_exec", return_value=mock_proc):
+            await registry.execute(meta, {"who": "Ada"})
+
+        log_text = (worker_dir / "memory" / "log.md").read_text()
+        assert "command | greet who=Ada" in log_text
+
+    async def test_execute_does_not_log_on_failure(self, registry: CommandRegistry, worker_dir: Path) -> None:
+        # To exercise the failure path, use a CommandMeta pointing at a script that
+        # exits non-zero.
+        bad_script = worker_dir / "commands" / "failing.py"
+        bad_script.write_text("import sys\nsys.exit(1)\n")
+        meta = CommandMeta(name="failing", description="fails", script_path=str(bad_script))
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"", b"Error!\n")
+        mock_proc.returncode = 1
+
+        with patch("hive.worker.commands.asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(CommandError):
+                await registry.execute(meta, {})
+
+        log_path = worker_dir / "memory" / "log.md"
+        assert not log_path.exists()
+
+
+# ---------------------------------------------------------------------------
 # telegram_handlers
 # ---------------------------------------------------------------------------
 
