@@ -239,3 +239,16 @@ class TestRunAgentPrompt:
             sched.start()
         assert "not yet functional" in caplog.text
         sched.stop()
+
+    async def test_run_agent_prompt_logs_completion(
+        self,
+        scheduler: WorkerScheduler,
+        worker_dir: Path,
+    ) -> None:
+        entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
+        with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock):
+            await scheduler._run_agent_prompt(entry)
+
+        log_text = (worker_dir / "memory" / "log.md").read_text()
+        assert "agent_prompt | 0 9 * * 1" in log_text
+        assert "Do the thing" in log_text
