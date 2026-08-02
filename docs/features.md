@@ -217,6 +217,11 @@ Get your Telegram user ID by sending `/start` to [@userinfobot](https://t.me/use
 
 The `memory/` directory is the agent's primary state store. The agent reads and writes files there across sessions using its built-in `Read`, `Write`, `Bash`, and `Glob` tools.
 
+Every Worker also gets, on by default with no configuration:
+
+- **`write_page` tool** — lets the agent save or update a durable knowledge page under `memory/notes/<slug>.md`. Each save also upserts a matching line in `memory/index.md`, so the notes stay browsable as a catalog. Overwrites are safe: every write is auto-committed to git (see below), so prior versions are always recoverable via `git log -p -- memory/notes/<slug>.md`.
+- **`memory/log.md`** — an auto-maintained, chronological, append-only record of Worker activity: commands run (via Telegram, the agent, or a schedule), completed scheduled `agent_prompt` jobs, notes saved via `write_page`, and files changed during chat. Each line follows `## [YYYY-MM-DD HH:MM] <type> | <detail>`, so `grep "^## \[" memory/log.md | tail -5` gives you the most recent activity. This file is deterministic, not agent-written — you can trust it even if the agent's own summaries drift.
+
 After every agent turn, Hive automatically commits any modified files in these paths to the Worker's git repo:
 
 ```
