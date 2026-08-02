@@ -544,3 +544,88 @@ class TestHandleNlMessageWithRestart:
 
         rt._app.bot.send_message.assert_not_awaited()
         mock_restart.assert_not_called()
+
+
+class TestChatWriteLogging:
+    async def test_no_log_entry_when_turn_only_reads(self, tmp_path):
+        """A turn with only non-mutating tool chunks produces no chat_write entry."""
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+
+        async def _stream(*args, **kwargs):
+            yield StreamChunk(
+                "", is_tool=True, tool_name="Read",
+                tool_input={"file_path": "notes.md"}, is_mutating=False,
+            )
+            yield StreamChunk("Here's what I found.")
+
+        rt._agent.stream = _stream
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 42
+        update.message.text = "what does notes.md say?"
+        context = MagicMock()
+        context.bot = AsyncMock()
+
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock):
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                await rt._handle_nl_message(update, context)
+
+        log_path = tmp_path / "memory" / "log.md"
+        assert not log_path.exists()
+
+    async def test_log_entry_when_turn_writes_a_file(self, tmp_path):
+        """A turn with a mutating tool chunk produces exactly one chat_write entry listing the path."""
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+
+        async def _stream(*args, **kwargs):
+            yield StreamChunk(
+                "", is_tool=True, tool_name="Write",
+                tool_input={"file_path": "memory/notes/x.md", "content": "hi"}, is_mutating=True,
+            )
+            yield StreamChunk("Saved it.")
+
+        rt._agent.stream = _stream
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 42
+        update.message.text = "save this"
+        context = MagicMock()
+        context.bot = AsyncMock()
+
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock):
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                await rt._handle_nl_message(update, context)
+
+        log_text = (tmp_path / "memory" / "log.md").read_text()
+        assert log_text.count("chat_write") == 1
+        assert "memory/notes/x.md" in log_text
+
+    async def test_empty_text_chunk_does_not_break_reply_threading(self, tmp_path):
+        """A metadata-only chunk (empty text) arriving first must not consume the 'reply to message' slot."""
+        rt = _make_runtime(tmp_path)
+        rt._agent = AsyncMock()
+
+        async def _stream(*args, **kwargs):
+            yield StreamChunk(
+                "", is_tool=True, tool_name="Bash",
+                tool_input={"command": "ls"}, is_mutating=False,
+            )
+            yield StreamChunk("Done.")
+
+        rt._agent.stream = _stream
+        update = MagicMock()
+        update.effective_user.id = 42
+        update.effective_chat.id = 42
+        update.message.text = "list files"
+        context = MagicMock()
+        context.bot = AsyncMock()
+
+        with patch("hive.worker.runtime.send_long_message", new_callable=AsyncMock) as mock_send:
+            with patch.object(rt, "_auto_commit", new_callable=AsyncMock):
+                await rt._handle_nl_message(update, context)
+
+        # Exactly one send call, and it targets update.message (a reply), not (bot, chat_id)
+        mock_send.assert_awaited_once()
+        assert mock_send.call_args.args[0] is update.message
