@@ -701,6 +701,16 @@ def test_clear_session_override_noop_when_absent(runner):
     runner.clear_session_override(999)
 
 
+# ------------------------------------------------------------------ #
+# memory_dir property
+# ------------------------------------------------------------------ #
+
+
+def test_memory_dir_property(runner, worker_dir):
+    """memory_dir combines worker_dir and the configured memory_dir."""
+    assert runner.memory_dir == worker_dir / "memory/"
+
+
 @pytest.mark.asyncio
 async def test_reset_session_clears_overrides(runner, sessions_file):
     runner._sessions[5] = {"chat_id": 5, "session_id": "s5"}

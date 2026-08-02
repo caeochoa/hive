@@ -343,6 +343,11 @@ class ClaudeAgentRunner(AgentRunner):
         """Attach the built-in MCP server after construction."""
         self._builtins_mcp = server
 
+    @property
+    def memory_dir(self) -> Path:
+        """Absolute path to this Worker's memory directory."""
+        return self._worker_dir / self._config.memory_dir
+
     # ------------------------------------------------------------------ #
     # Client management
     # ------------------------------------------------------------------ #
