@@ -49,6 +49,14 @@ def commands_mcp():
     return MagicMock()
 
 
+def test_stream_chunk_default_new_fields_are_none():
+    """New tool-call fields default to None so unrelated StreamChunk(...) calls are unaffected."""
+    chunk = StreamChunk("hello")
+    assert chunk.tool_name is None
+    assert chunk.tool_input is None
+    assert chunk.is_mutating is None
+
+
 @pytest.fixture()
 def runner(agent_config, commands_mcp, sessions_file, worker_dir):
     return ClaudeAgentRunner(
@@ -1124,12 +1132,17 @@ async def test_stream_one_shot_yields_tool_use_at_minimal(agent_config, commands
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert chunks == [StreamChunk("🔧 Bash", is_tool=True)]
+    assert chunks == [
+        StreamChunk(
+            "🔧 Bash", is_tool=True,
+            tool_name="Bash", tool_input={"command": "ls"}, is_mutating=False,
+        )
+    ]
 
 
 @pytest.mark.asyncio
-async def test_stream_one_shot_suppresses_tool_use_at_none(agent_config, commands_mcp, sessions_file, worker_dir):
-    """ToolUseBlock is not yielded when tool_verbosity='none'."""
+async def test_stream_one_shot_tool_use_at_none_has_empty_text(agent_config, commands_mcp, sessions_file, worker_dir):
+    """At tool_verbosity='none', ToolUseBlock still yields a chunk (for is_mutating tracking) but with empty text."""
     agent_config.tool_verbosity = "none"
     agent_config.show_thinking = False
     runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
@@ -1163,7 +1176,52 @@ async def test_stream_one_shot_suppresses_tool_use_at_none(agent_config, command
     with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
         chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
 
-    assert chunks == []
+    assert chunks == [
+        StreamChunk(
+            "", is_tool=True,
+            tool_name="Bash", tool_input={"command": "ls"}, is_mutating=False,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_one_shot_write_tool_is_mutating(agent_config, commands_mcp, sessions_file, worker_dir):
+    """ToolUseBlock named Write yields is_mutating=True."""
+    agent_config.tool_verbosity = "none"
+    agent_config.show_thinking = False
+    runner = ClaudeAgentRunner(agent_config, commands_mcp, [], sessions_file, worker_dir)
+
+    ToolUseBlock = type("ToolUseBlock", (), {})
+    AssistantMessage = type("AssistantMessage", (), {})
+    DummyMsg = type("DummyMsg", (), {})
+
+    tub = ToolUseBlock()
+    tub.name = "Write"
+    tub.input = {"file_path": "memory/notes/x.md", "content": "hi"}
+    assistant_msg = AssistantMessage()
+    assistant_msg.content = [tub]
+
+    async def mock_query(**kwargs):
+        yield assistant_msg
+
+    mock_sdk = MagicMock(
+        ClaudeAgentOptions=MagicMock(return_value=MagicMock()),
+        ClaudeSDKClient=MagicMock(),
+        AssistantMessage=AssistantMessage,
+        UserMessage=DummyMsg,
+        ResultMessage=DummyMsg,
+        ThinkingBlock=DummyMsg,
+        ToolUseBlock=ToolUseBlock,
+        ToolResultBlock=DummyMsg,
+        TextBlock=type("TextBlock", (), {}),
+    )
+    mock_sdk.query = MagicMock(return_value=mock_query())
+
+    with patch.dict(sys.modules, {"claude_agent_sdk": mock_sdk}):
+        chunks = [c async for c in runner.stream("hello", chat_id=None, worker_dir=worker_dir)]
+
+    assert chunks[0].is_mutating is True
+    assert chunks[0].tool_input == {"file_path": "memory/notes/x.md", "content": "hi"}
 
 
 @pytest.mark.asyncio
@@ -1425,7 +1483,10 @@ async def test_stream_one_shot_preserves_block_order(agent_config, commands_mcp,
 
     assert len(chunks) == 2
     assert chunks[0] == StreamChunk("I'll look that up")
-    assert chunks[1] == StreamChunk("🔧 Read", is_tool=True)
+    assert chunks[1] == StreamChunk(
+        "🔧 Read", is_tool=True,
+        tool_name="Read", tool_input={"file_path": "/tmp/x"}, is_mutating=False,
+    )
 
 
 # ------------------------------------------------------------------ #
