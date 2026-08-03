@@ -63,6 +63,24 @@ def build_builtin_mcp_server(runner: ClaudeAgentRunner) -> Any:
         summary = str(args.get("summary", ""))
         content = str(args.get("content", ""))
 
+        missing = [
+            name
+            for name, value in (
+                ("slug", slug), ("title", title), ("summary", summary), ("content", content),
+            )
+            if not value
+        ]
+        if missing:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Error: missing required field(s): {', '.join(missing)}",
+                    }
+                ],
+                "is_error": True,
+            }
+
         try:
             write_page(runner.memory_dir, slug, title, summary, content)
         except ValueError as exc:

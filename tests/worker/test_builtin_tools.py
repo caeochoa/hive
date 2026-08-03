@@ -221,3 +221,56 @@ async def test_write_page_handler_invalid_slug_returns_error(tmp_path):
 
     assert result.get("is_error") is True
     assert not (tmp_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_write_page_handler_missing_title_returns_error(tmp_path):
+    """A missing (absent) title field is caught before write_page is called."""
+    runner = _make_runner()
+    runner.memory_dir = tmp_path
+    handler = _get_write_page_handler(runner)
+
+    result = await handler({
+        "slug": "thompson-thesis",
+        "summary": "Evolving view on X",
+        "content": "# Body",
+    })
+
+    assert result.get("is_error") is True
+    assert "title" in result["content"][0]["text"]
+    assert not (tmp_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_write_page_handler_empty_content_returns_error(tmp_path):
+    """A present-but-empty content field is treated as missing, not written as an empty note."""
+    runner = _make_runner()
+    runner.memory_dir = tmp_path
+    handler = _get_write_page_handler(runner)
+
+    result = await handler({
+        "slug": "thompson-thesis",
+        "title": "Thompson's Thesis",
+        "summary": "Evolving view on X",
+        "content": "",
+    })
+
+    assert result.get("is_error") is True
+    assert "content" in result["content"][0]["text"]
+    assert not (tmp_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_write_page_handler_multiple_missing_fields_lists_all(tmp_path):
+    """When several fields are missing, the error names all of them."""
+    runner = _make_runner()
+    runner.memory_dir = tmp_path
+    handler = _get_write_page_handler(runner)
+
+    result = await handler({"slug": "thompson-thesis"})
+
+    assert result.get("is_error") is True
+    text = result["content"][0]["text"]
+    assert "title" in text
+    assert "summary" in text
+    assert "content" in text
