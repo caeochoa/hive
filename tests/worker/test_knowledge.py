@@ -174,3 +174,41 @@ def test_write_page_sanitizes_bracket_in_title(tmp_path: Path) -> None:
     link_text_end = line.index("](notes/a.md)")
     link_text = line[len("- [") : link_text_end]
     assert "]" not in link_text
+
+
+def test_write_page_summary_containing_link_syntax_does_not_corrupt_other_slug(tmp_path: Path) -> None:
+    """A summary that happens to contain literal markdown-link text pointing
+    at another slug's note (e.g. because an LLM-generated summary
+    cross-references it) must not fool the line-ownership match into
+    treating that as a real link and overwriting the wrong line."""
+    write_page(
+        tmp_path,
+        "a",
+        "Title A",
+        "See also ](notes/b.md) for related info",
+        "body a",
+    )
+    write_page(tmp_path, "b", "Title B", "Summary B", "body b")
+
+    # Re-upsert 'b'. Under a naive substring match, "](notes/b.md)" embedded
+    # in a's summary would match first (a's line comes before b's in the
+    # file) and get clobbered with b's new content instead of b's own line.
+    write_page(tmp_path, "b", "Title B", "Updated Summary B", "body b v2")
+
+    lines = (tmp_path / "index.md").read_text().splitlines()
+    a_lines = [ln for ln in lines if ln.startswith("- [Title A]")]
+    b_lines = [ln for ln in lines if ln.startswith("- [Title B]")]
+
+    assert len(a_lines) == 1
+    assert "See also" in a_lines[0]  # a's own line untouched
+    assert len(b_lines) == 1
+    assert "Updated Summary B" in b_lines[0]
+
+    # a's own line can still be upserted normally afterward, proving the
+    # structural match still recognizes a's own entry — it doesn't just
+    # reject everything.
+    write_page(tmp_path, "a", "Title A", "Final Summary A", "body a v2")
+    lines = (tmp_path / "index.md").read_text().splitlines()
+    a_lines = [ln for ln in lines if ln.startswith("- [Title A]")]
+    assert len(a_lines) == 1
+    assert "Final Summary A" in a_lines[0]

@@ -21,6 +21,7 @@ _INDEX_HEADER = (
     "upserted by slug and hand edits may be overwritten. -->\n"
 )
 _SLUG_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+_INDEX_ENTRY_SLUG_RE = re.compile(r"^- \[[^\]]*\]\(notes/([a-z0-9]+(?:-[a-z0-9]+)*)\.md\)")
 
 
 def append_log(memory_dir: Path, entry_type: str, detail: str) -> None:
@@ -74,9 +75,17 @@ def _sanitize_index_field(value: str, *, strip_brackets: bool = False) -> str:
 
 
 def _upsert_index(memory_dir: Path, slug: str, title: str, summary: str) -> None:
-    """Replace the index.md line for slug in place, or append a new one."""
+    """Replace the index.md line for slug in place, or append a new one.
+
+    Ownership of a line is decided structurally, not by substring search:
+    _INDEX_ENTRY_SLUG_RE anchors at the start of the line and captures the
+    slug out of the href immediately following the first ']'. Because
+    title is guaranteed ']'-free (see _sanitize_index_field), that first
+    ']' is always the link's own closing bracket — even if summary (free
+    text, often LLM-generated) happens to contain literal markdown-link
+    syntax like "](notes/other-slug.md)" later in the line.
+    """
     index_path = memory_dir / "index.md"
-    link_marker = f"](notes/{slug}.md)"
     date = datetime.now().strftime("%Y-%m-%d")
     safe_title = _sanitize_index_field(title, strip_brackets=True)
     safe_summary = _sanitize_index_field(summary)
@@ -88,7 +97,8 @@ def _upsert_index(memory_dir: Path, slug: str, title: str, summary: str) -> None
         lines = [_INDEX_HEADER, "\n"]
 
     for i, existing in enumerate(lines):
-        if link_marker in existing:
+        match = _INDEX_ENTRY_SLUG_RE.match(existing)
+        if match is not None and match.group(1) == slug:
             lines[i] = new_line
             break
     else:
