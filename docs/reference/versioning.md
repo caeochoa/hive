@@ -1,6 +1,6 @@
 # Versioning & Changelog Conventions
 
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-04_
 
 ---
 
@@ -24,10 +24,15 @@ _Last updated: 2026-08-01_
   that silently changes behavior they may be relying on. Flag these clearly
   (e.g. a `**Breaking:**`-prefixed bullet) so `hive update`'s excerpt makes
   the stakes obvious.
-- Bumping `pyproject.toml`'s version and cutting a release/tag is a manual,
-  human decision — not automated by this repo. At release time, move the
-  `[Unreleased]` section's contents under a new `## [x.y.z] - YYYY-MM-DD`
-  heading and tag `vX.Y.Z`.
+- Hive has no separate publish step — it's installed as a single editable
+  checkout, so "merged to `main`" and "released" are the same thing. Any PR
+  that adds a `CHANGELOG.md` entry under `[Unreleased]` must, **in that same
+  PR**, also bump `pyproject.toml`'s `[project] version` and move the
+  `[Unreleased]` section's contents (that entry and anything else already
+  sitting there) under a new `## [x.y.z] - YYYY-MM-DD` heading, then tag
+  `vX.Y.Z`. `[Unreleased]` should be empty on `main` between PRs — it's a
+  within-PR staging area, not a backlog. This keeps `hive_version`
+  comparisons and `hive update`'s output accurate as of the latest merge.
 
 ## For Worker developers
 
