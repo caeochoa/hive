@@ -239,3 +239,65 @@ class TestRunAgentPrompt:
             sched.start()
         assert "not yet functional" in caplog.text
         sched.stop()
+
+    async def test_run_agent_prompt_logs_completion(
+        self,
+        scheduler: WorkerScheduler,
+        worker_dir: Path,
+    ) -> None:
+        entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
+        with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock):
+            await scheduler._run_agent_prompt(entry)
+
+        log_text = (worker_dir / "memory" / "log.md").read_text()
+        assert "agent_prompt | 0 9 * * 1" in log_text
+        assert "Do the thing" in log_text
+
+    async def test_run_agent_prompt_skips_empty_text_chunks(
+        self,
+        scheduler: WorkerScheduler,
+        agent: AsyncMock,
+        bot: AsyncMock,
+        auto_commit: AsyncMock,
+        caplog,
+    ) -> None:
+        """An empty-text chunk (e.g. tool_verbosity='none') must not be sent or counted."""
+
+        async def _stream(*args, **kwargs):
+            yield StreamChunk("", is_tool=True, tool_name="Read")
+            yield StreamChunk("Real text")
+
+        agent.stream = _stream
+        entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
+        with caplog.at_level(logging.INFO, logger="hive.worker.scheduler"):
+            with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock) as mock_send:
+                await scheduler._run_agent_prompt(entry)
+
+        mock_send.assert_awaited_once()
+        call_args = mock_send.call_args
+        assert call_args.args[1] == "Real text"
+        assert "1 chunks" in caplog.text
+
+    async def test_run_agent_prompt_logs_and_commits_on_failure(
+        self,
+        scheduler: WorkerScheduler,
+        agent: AsyncMock,
+        auto_commit: AsyncMock,
+        worker_dir: Path,
+    ) -> None:
+        """append_log and auto_commit must still run when the stream raises mid-iteration."""
+
+        async def _failing_stream(*args, **kwargs):
+            yield StreamChunk("Partial text")
+            raise RuntimeError("boom")
+
+        agent.stream = _failing_stream
+        entry = ScheduleEntry(cron="0 9 * * 1", agent_prompt="Do the thing")
+        with patch("hive.worker.scheduler.send_long_message", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="boom"):
+                await scheduler._run_agent_prompt(entry)
+
+        log_text = (worker_dir / "memory" / "log.md").read_text()
+        assert "agent_prompt | 0 9 * * 1" in log_text
+        assert "Do the thing" in log_text
+        auto_commit.assert_awaited_once()

@@ -16,6 +16,7 @@ from hive.shared.config import WorkerConfig
 from hive.shared.models import ScheduleEntry
 from hive.worker.agent import AgentRunner
 from hive.worker.commands import CommandError, CommandRegistry
+from hive.worker.knowledge import append_log
 from hive.worker.utils import send_long_message
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,8 @@ class WorkerScheduler:
                 async for chunk in self._agent.stream(
                     prompt, chat_id=user_id, worker_dir=self._config.worker_dir
                 ):
+                    if not chunk.text:
+                        continue  # metadata-only chunk (e.g. tool_verbosity="none"); nothing to send
                     await send_long_message((self._bot, user_id), chunk.to_telegram_html(), parse_mode="HTML")
                     chunk_count += 1
                 logger.info(
@@ -132,6 +135,11 @@ class WorkerScheduler:
                     user_id, chunk_count,
                 )
         finally:
+            append_log(
+                self._config.worker_dir / self._config.agent_memory_dir,
+                "agent_prompt",
+                f"{entry.cron} — {prompt[:60]}",
+            )
             await self._auto_commit("scheduled agent prompt")
 
     def _on_job_error(self, event: JobExecutionEvent) -> None:

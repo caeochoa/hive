@@ -1,10 +1,11 @@
-"""In-process MCP server exposing built-in agent tools (set_session_config, etc.)."""
+"""In-process MCP server exposing built-in agent tools (set_session_config, write_page)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from hive.worker.agent import _current_chat_id
+from hive.worker.knowledge import write_page
 
 if TYPE_CHECKING:
     from hive.worker.agent import ClaudeAgentRunner
@@ -55,7 +56,49 @@ def build_builtin_mcp_server(runner: ClaudeAgentRunner) -> Any:
             ]
         }
 
-    tool = SdkMcpTool(
+    async def write_page_handler(args: dict[str, Any]) -> dict[str, Any]:
+        """Handle write_page tool calls from the agent."""
+        slug = str(args.get("slug", ""))
+        title = str(args.get("title", ""))
+        summary = str(args.get("summary", ""))
+        content = str(args.get("content", ""))
+
+        missing = [
+            name
+            for name, value in (
+                ("slug", slug), ("title", title), ("summary", summary), ("content", content),
+            )
+            if not value
+        ]
+        if missing:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Error: missing required field(s): {', '.join(missing)}",
+                    }
+                ],
+                "is_error": True,
+            }
+
+        try:
+            write_page(runner.memory_dir, slug, title, summary, content)
+        except ValueError as exc:
+            return {
+                "content": [{"type": "text", "text": f"Error: {exc}"}],
+                "is_error": True,
+            }
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Saved memory/notes/{slug}.md and updated memory/index.md.",
+                }
+            ]
+        }
+
+    set_session_config_tool = SdkMcpTool(
         name="set_session_config",
         description=(
             "Override agent configuration for the current Telegram chat session. "
@@ -83,4 +126,39 @@ def build_builtin_mcp_server(runner: ClaudeAgentRunner) -> Any:
         handler=set_session_config_handler,
     )
 
-    return create_sdk_mcp_server("builtins", tools=[tool])
+    write_page_tool = SdkMcpTool(
+        name="write_page",
+        description=(
+            "Save or update a durable knowledge page under memory/notes/. Use this when "
+            "you've produced a synthesis, answer, or understanding worth keeping — not for "
+            "routine notes. If a page on this topic already exists (check with Glob/Grep/Read "
+            "on memory/notes/ first), prefer updating it over creating a near-duplicate — read "
+            "it first so you don't drop existing content. Overwrites are safe: every write is "
+            "auto-committed to git, so prior versions are always recoverable."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "description": "Kebab-case page id, e.g. 'thompson-thesis' (lowercase letters, digits, hyphens only)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Human-readable page title",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One-line summary shown in memory/index.md",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full markdown body of the page",
+                },
+            },
+            "required": ["slug", "title", "summary", "content"],
+        },
+        handler=write_page_handler,
+    )
+
+    return create_sdk_mcp_server("builtins", tools=[set_session_config_tool, write_page_tool])

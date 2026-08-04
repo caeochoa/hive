@@ -30,6 +30,7 @@ from hive.worker.builtins import (
     make_set_handler,
 )
 from hive.worker.commands import CommandRegistry
+from hive.worker.knowledge import append_log
 from hive.worker.utils import send_long_message, typing_action
 
 logger = logging.getLogger(__name__)
@@ -240,6 +241,7 @@ class WorkerRuntime:
         before = self._snapshot_worker_paths()
 
         try:
+            mutated_paths: set[str] = set()
             async with typing_action(context.bot, chat_id):
                 first_chunk = True
                 async for chunk in self._agent.stream(
@@ -247,11 +249,28 @@ class WorkerRuntime:
                     chat_id,
                     self._config.worker_dir,
                 ):
+                    if chunk.is_mutating:
+                        path = (chunk.tool_input or {}).get("file_path") or (
+                            chunk.tool_input or {}
+                        ).get("notebook_path")
+                        if path:
+                            mutated_paths.add(path)
+
+                    if not chunk.text:
+                        continue  # metadata-only chunk (e.g. tool_verbosity="none"); nothing to send
+
                     # First chunk replies to the user's message (preserves threading in groups).
                     # Subsequent chunks are sent as standalone messages to avoid multiple reply heads.
                     target = update.message if first_chunk else (context.bot, chat_id)
                     first_chunk = False
                     await send_long_message(target, chunk.to_telegram_html(), parse_mode="HTML")
+
+            if mutated_paths:
+                append_log(
+                    self._config.worker_dir / self._config.agent_memory_dir,
+                    "chat_write",
+                    ", ".join(sorted(mutated_paths)),
+                )
 
             # Snapshot is taken inside try so that any Telegram send failure during
             # the stream aborts restart detection — we don't restart if we couldn't

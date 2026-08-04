@@ -33,12 +33,20 @@ DEFAULT_SYSTEM_PROMPT = (
 # ContextVar set by _stream_interactive so builtin MCP tools can identify the caller.
 _current_chat_id: ContextVar[int | None] = ContextVar("_current_chat_id", default=None)
 
+# Tools ClaudeAgentRunner treats as file-mutating, for StreamChunk.is_mutating.
+# This is ClaudeAgentRunner's own judgment about its own tool set — no other
+# module inspects tool names (see StreamChunk.is_mutating docstring above).
+_MUTATING_TOOL_NAMES = frozenset({"Write", "Edit", "NotebookEdit"})
+
 
 @dataclass
 class StreamChunk:
     text: str
     is_html: bool = False  # True = pre-rendered Telegram HTML; do NOT pass through md_to_telegram_html
     is_tool: bool = False  # True = tool notification; excluded from run() accumulation
+    tool_name: str | None = None  # ToolUseBlock.name, when is_tool is a tool-use chunk
+    tool_input: dict[str, Any] | None = None  # ToolUseBlock.input, same chunks
+    is_mutating: bool | None = None  # AgentRunner's own judgment: True for Write/Edit/NotebookEdit
 
     def to_telegram_html(self) -> str:
         """Return Telegram-ready HTML: pre-rendered chunks pass through; markdown is converted."""
@@ -162,9 +170,14 @@ def _yield_msg_chunks(
                 if text_parts:
                     yield StreamChunk("\n".join(text_parts))
                     text_parts = []
-                text = _format_tool_use(block.name, block.input, tool_verbosity)
-                if text:
-                    yield StreamChunk(text, is_tool=True)
+                text = _format_tool_use(block.name, block.input, tool_verbosity) or ""
+                yield StreamChunk(
+                    text,
+                    is_tool=True,
+                    tool_name=block.name,
+                    tool_input=block.input,
+                    is_mutating=block.name in _MUTATING_TOOL_NAMES,
+                )
         if text_parts:
             yield StreamChunk("\n".join(text_parts))
     elif isinstance(msg, UserMessage):
@@ -330,6 +343,11 @@ class ClaudeAgentRunner(AgentRunner):
         """Attach the built-in MCP server after construction."""
         self._builtins_mcp = server
 
+    @property
+    def memory_dir(self) -> Path:
+        """Absolute path to this Worker's memory directory."""
+        return self._worker_dir / self._config.memory_dir
+
     # ------------------------------------------------------------------ #
     # Client management
     # ------------------------------------------------------------------ #
@@ -377,7 +395,7 @@ class ClaudeAgentRunner(AgentRunner):
                 "allowed_tools": [
                     "Read", "Write", "Bash", "Glob",
                     *self._command_names,
-                    *(["set_session_config"] if self._builtins_mcp is not None else []),
+                    *(["set_session_config", "write_page"] if self._builtins_mcp is not None else []),
                 ],
                 "permission_mode": "bypassPermissions",
                 "cwd": str(self._worker_dir),
