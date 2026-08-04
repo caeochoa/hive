@@ -6,6 +6,8 @@ See `docs/reference/versioning.md` for when to add an entry.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-04
+
 ### Added
 
 - Every Worker's agent now has a built-in `write_page` tool for saving or
