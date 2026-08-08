@@ -1,6 +1,10 @@
 # Hive Roadmap
 
-Tracks features, bugs, and backlog items. Format:
+Tracks planned and backlog work — bugs, features, and ideas not yet built. For what's actually shipped today, see [`docs/features.md`](features.md); this file is scope/intent, that one is current capability.
+
+There's no separate "in progress" section — an open branch or PR against an item here is the in-progress signal. Check `hive`'s open PRs/branches if you want to know what's actively being worked on.
+
+Format:
 
 ```
 - [ ] **Title** — brief summary

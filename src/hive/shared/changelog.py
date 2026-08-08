@@ -90,6 +90,26 @@ def entries_between(
     return result
 
 
+def compare_versions(worker_version: str | None, installed_version: str) -> str:
+    """Compare a Worker's stamped hive_version to the installed Hive version.
+
+    Returns "unknown" (no/unparseable worker_version), "match", "ahead"
+    (worker_version > installed — unusual), or "behind".
+    """
+    if worker_version is None:
+        return "unknown"
+    try:
+        worker_v = Version(worker_version)
+        installed_v = Version(installed_version)
+    except InvalidVersion:
+        return "unknown"
+    if worker_v == installed_v:
+        return "match"
+    if worker_v > installed_v:
+        return "ahead"
+    return "behind"
+
+
 def find_changelog_text() -> str | None:
     """Best-effort changelog lookup: local source checkout, then GitHub raw fetch."""
     local_path = Path(__file__).resolve().parents[3] / "CHANGELOG.md"
