@@ -37,6 +37,8 @@ hive start <path>
 
 If the Worker's `name` in `hive.toml` has changed since it was last registered, `start` removes the stale supervisord entry and re-registers under the new name.
 
+If the Worker's stamped `hive_version` is behind the installed Hive version, `start` prints a short note pointing at `hive update <path>` — see [`hive update`](#hive-update-path) below.
+
 ```bash
 hive start ~/workers/my-bot
 hive start .   # from inside the Worker folder
@@ -59,6 +61,8 @@ Stop and restart a Worker process. Use this to apply changes to `hive.toml` or `
 ```
 hive restart <path>
 ```
+
+Like `hive start`, prints a note if the Worker's `hive_version` is behind the installed Hive version.
 
 ## `hive remove <path> [--delete]`
 
@@ -85,6 +89,8 @@ hive status
 
 Output is the raw `supervisorctl status` output. Each line shows the process name, state (RUNNING, STOPPED, FATAL, etc.), and uptime.
 
+If any registered Worker's `hive_version` is behind the installed Hive version, a trailing section lists them (name, stamped version) and points at `hive update <path>` for details.
+
 ## `hive version`
 
 Print the installed Hive version.
@@ -93,18 +99,58 @@ Print the installed Hive version.
 hive version
 ```
 
-## `hive upgrade`
+## `hive update` vs `hive repair`
+
+These names look similar but do unrelated things — don't confuse them:
+
+| | `hive update <path>` | `hive repair` |
+|---|---|---|
+| Scope | One Worker | Every registered Worker + Comb |
+| Mutates files? | Only with `--bump` (rewrites `hive_version`) | Always (supervisord/LaunchAgent config) |
+| Purpose | "What changed in Hive since I scaffolded this Worker?" | "Fix my process-management setup" |
+| How often | Routine — surfaced automatically by `start`/`restart`/`status` | Rare — after a Hive upgrade, a reboot, or manual config edits |
+
+## `hive update <path> [--bump]`
+
+Report what's changed in Hive since a specific Worker was scaffolded, by reading its `[worker] hive_version` field. Without `--bump`, this only reports — it never rewrites `hive.toml` or any other file.
+
+```
+hive update <path>
+hive update <path> --bump
+```
+
+What it does:
+
+1. Reads the Worker's `[worker] hive_version` field (the Hive version it was scaffolded against, stamped by `hive init`).
+2. Compares it to the currently installed Hive version.
+3. Prints the relevant `CHANGELOG.md` entries between those two versions, if the changelog is available (falls back to a link if it isn't — e.g. for some non-source installs).
+4. If `--bump` is passed, rewrites `hive_version` in the Worker's `hive.toml` to the installed version once you've reviewed the drift and confirmed nothing affects you. This is the one case where `hive update` writes to a Worker's files — everything else it does is read-only.
+
+Workers created before this feature existed have no `hive_version` field; `update` treats these as an unknown baseline and shows full changelog history.
+
+For source/editable installs, the changelog is read straight from disk (no network). For other installs (e.g. via `uv tool install`), Hive doesn't ship `CHANGELOG.md` in the package, so `update` makes a single read-only HTTPS request to fetch it from `raw.githubusercontent.com/caeochoa/hive` (3s timeout); if that fails or you're offline, it prints a link instead.
+
+You don't need to run this proactively for every Worker — `hive start`, `hive restart`, and `hive status` all flag `hive_version` drift automatically and point back here for details.
+
+```bash
+hive update ~/workers/my-bot
+hive update ~/workers/my-bot --bump   # after confirming nothing breaking applies
+```
+
+See [Versioning](../reference/versioning.md) for the full convention.
+
+## `hive repair`
 
 Re-apply all process management configuration for the current installation. Run this after upgrading Hive, or if Workers fail to start after a system reboot.
 
 ```
-hive upgrade
+hive repair
 ```
 
 What it does:
 
 1. Ensures `supervisord.conf` runs supervisord in foreground mode (`nodaemon=true`), required for correct launchd supervision. Migrates existing configs automatically.
-2. In login mode: regenerates the macOS LaunchAgent plist (`~/Library/LaunchAgents/com.hive.supervisord.plist`) if it is missing the `EnvironmentVariables` section, so supervisord and its child processes inherit the user's `PATH`. In boot mode: compares the installed LaunchDaemon plist against the current environment and reports if it's outdated (refreshing needs sudo, so run `hive boot enable` to apply — `upgrade` itself never prompts for a password).
+2. In login mode: regenerates the macOS LaunchAgent plist (`~/Library/LaunchAgents/com.hive.supervisord.plist`) if it is missing the `EnvironmentVariables` section, so supervisord and its child processes inherit the user's `PATH`. In boot mode: compares the installed LaunchDaemon plist against the current environment and reports if it's outdated (refreshing needs sudo, so run `hive boot enable` to apply — `repair` itself never prompts for a password).
 3. Rewrites every registered Worker's supervisord conf to use the absolute path to `hive`, so Workers start correctly under launchd's minimal environment.
 4. Rewrites the Comb dashboard conf with the absolute `hive` path.
 5. Signals supervisord to reload and apply all changes.
@@ -116,35 +162,11 @@ What it does:
 - After any manual change to supervisord configs that may have reverted settings
 
 ```bash
-hive upgrade
+hive repair
 hive status   # verify all workers are RUNNING
 ```
 
 If the problem is that Workers only come back *after you log in*, that's the LaunchAgent working as designed — use `hive boot enable` to start them at boot instead.
-
-## `hive update <path>`
-
-Report what's changed in Hive since a specific Worker was scaffolded. Read-only — never modifies the Worker's `hive.toml` or any other file. **Not the same as `hive upgrade`**: `upgrade` re-applies process management config across all Workers; `update` reports Hive version drift for one Worker by reading its `hive.toml`.
-
-```
-hive update <path>
-```
-
-What it does:
-
-1. Reads the Worker's `[worker] hive_version` field (the Hive version it was scaffolded against, stamped by `hive init`).
-2. Compares it to the currently installed Hive version.
-3. Prints the relevant `CHANGELOG.md` entries between those two versions, if the changelog is available (falls back to a link if it isn't — e.g. for some non-source installs).
-
-Workers created before this feature existed have no `hive_version` field; `update` treats these as an unknown baseline and shows full changelog history.
-
-For source/editable installs, the changelog is read straight from disk (no network). For other installs (e.g. via `uv tool install`), Hive doesn't ship `CHANGELOG.md` in the package, so `update` makes a single read-only HTTPS request to fetch it from `raw.githubusercontent.com/caeochoa/hive` (3s timeout); if that fails or you're offline, it prints a link instead.
-
-```bash
-hive update ~/workers/my-bot
-```
-
-See [Versioning](../reference/versioning.md) for the full convention.
 
 ## `hive boot enable|disable|status`
 

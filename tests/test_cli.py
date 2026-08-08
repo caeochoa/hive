@@ -143,6 +143,28 @@ class TestStart:
         result = runner.invoke(app, ["start", str(tmp_path)])
         assert result.exit_code == 1
 
+    def test_start_warns_when_worker_behind(self, tmp_path):
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "test"\nhive_version = "0.0.1"\n')
+        (tmp_path / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=tok\nTELEGRAM_ALLOWED_USER_ID=1\n"
+        )
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch("hive.shared.supervisor.reload_supervisord"),
+            patch("hive.shared.supervisor.write_worker_block"),
+            patch(
+                "hive.shared.supervisor.supervisorctl",
+                return_value=MagicMock(stdout="worker-test: started"),
+            ),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+            patch("hive.__version__", "0.2.0"),
+        ):
+            result = runner.invoke(app, ["start", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "hive update" in result.output
+
 
 class TestStop:
     def test_stop_calls_supervisorctl(self, tmp_path):
@@ -199,9 +221,14 @@ class TestRemove:
 
 class TestStatus:
     def test_status_shows_output(self):
-        with patch(
-            "hive.shared.supervisor.supervisorctl",
-            return_value=MagicMock(stdout="worker-test   RUNNING   pid 123"),
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch(
+                "hive.shared.supervisor.supervisorctl",
+                return_value=MagicMock(stdout="worker-test   RUNNING   pid 123"),
+            ),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
             result = runner.invoke(app, ["status"])
 
@@ -209,14 +236,39 @@ class TestStatus:
         assert "RUNNING" in result.output
 
     def test_status_no_workers(self):
-        with patch(
-            "hive.shared.supervisor.supervisorctl",
-            return_value=MagicMock(stdout=""),
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = []
+        with (
+            patch(
+                "hive.shared.supervisor.supervisorctl",
+                return_value=MagicMock(stdout=""),
+            ),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
             result = runner.invoke(app, ["status"])
 
         assert result.exit_code == 0
         assert "No workers running" in result.output
+
+    def test_status_flags_drifted_worker(self, tmp_path):
+        from hive.shared.models import WorkerEntry
+
+        (tmp_path / "hive.toml").write_text('[worker]\nname = "test"\nhive_version = "0.0.1"\n')
+        mock_registry = MagicMock()
+        mock_registry.list_workers.return_value = [WorkerEntry(name="test", path=str(tmp_path))]
+        with (
+            patch(
+                "hive.shared.supervisor.supervisorctl",
+                return_value=MagicMock(stdout="worker-test   RUNNING   pid 123"),
+            ),
+            patch(_REGISTRY_PATCH, return_value=mock_registry),
+            patch("hive.__version__", "0.2.0"),
+        ):
+            result = runner.invoke(app, ["status"])
+
+        assert result.exit_code == 0
+        assert "behind" in result.output
+        assert "test" in result.output
 
 
 class TestLogs:
@@ -245,12 +297,12 @@ class TestRun:
         assert result.exit_code == 1
 
 
-class TestUpgrade:
-    def test_upgrade_command_exists(self):
-        result = runner.invoke(app, ["upgrade", "--help"])
+class TestRepair:
+    def test_repair_command_exists(self):
+        result = runner.invoke(app, ["repair", "--help"])
         assert result.exit_code == 0
 
-    def test_upgrade_calls_all_migration_functions(self):
+    def test_repair_calls_all_migration_functions(self):
         mock_registry = MagicMock()
         mock_registry.list_workers.return_value = []
         with (
@@ -261,14 +313,14 @@ class TestUpgrade:
             patch("hive.shared.supervisor.reload_supervisord") as mock_reload,
             patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
-            result = runner.invoke(app, ["upgrade"])
+            result = runner.invoke(app, ["repair"])
         assert result.exit_code == 0
         mock_ensure.assert_called_once()
         mock_install.assert_called_once()
         mock_comb.assert_called_once()
         mock_reload.assert_called_once()
 
-    def test_upgrade_rewrites_worker_confs(self, tmp_path):
+    def test_repair_rewrites_worker_confs(self, tmp_path):
         from hive.shared.models import WorkerEntry
 
         mock_registry = MagicMock()
@@ -284,11 +336,11 @@ class TestUpgrade:
             patch("hive.shared.supervisor.write_worker_block") as mock_write,
             patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
-            result = runner.invoke(app, ["upgrade"])
+            result = runner.invoke(app, ["repair"])
         assert result.exit_code == 0
         mock_write.assert_called_once_with("budget", tmp_path)
 
-    def test_upgrade_daemon_mode_ok_skips_launchagent(self, tmp_path):
+    def test_repair_daemon_mode_ok_skips_launchagent(self, tmp_path):
         daemon_plist = tmp_path / "com.hive.supervisord.plist"
         daemon_plist.write_text("RENDERED")
         mock_registry = MagicMock()
@@ -303,12 +355,12 @@ class TestUpgrade:
             patch("hive.shared.supervisor.reload_supervisord"),
             patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
-            result = runner.invoke(app, ["upgrade"])
+            result = runner.invoke(app, ["repair"])
         assert result.exit_code == 0
         assert "LaunchDaemon: OK" in result.output
         mock_install.assert_not_called()
 
-    def test_upgrade_daemon_mode_reports_drift(self, tmp_path):
+    def test_repair_daemon_mode_reports_drift(self, tmp_path):
         daemon_plist = tmp_path / "com.hive.supervisord.plist"
         daemon_plist.write_text("STALE")
         mock_registry = MagicMock()
@@ -323,7 +375,7 @@ class TestUpgrade:
             patch("hive.shared.supervisor.reload_supervisord"),
             patch(_REGISTRY_PATCH, return_value=mock_registry),
         ):
-            result = runner.invoke(app, ["upgrade"])
+            result = runner.invoke(app, ["repair"])
         assert result.exit_code == 0
         assert "hive boot enable" in result.output
         mock_install.assert_not_called()
@@ -416,6 +468,38 @@ class TestUpdate:
         assert "could not compare" in result.output
         assert "up to date" not in result.output
         assert "behind" not in result.output
+
+    def test_update_bump_rewrites_hive_version_only(self, tmp_path):
+        toml_path = tmp_path / "hive.toml"
+        toml_path.write_text(
+            '[worker]\nname = "test"\nhive_version = "0.0.1"\n\n'
+            '[agent]\nmodel = "claude-haiku-4-5"\n'
+        )
+        with (
+            patch("hive.shared.changelog.find_changelog_text", return_value=None),
+            patch("hive.__version__", "0.2.0"),
+        ):
+            result = runner.invoke(app, ["update", str(tmp_path), "--bump"])
+
+        assert result.exit_code == 0
+        assert "Recorded hive_version" in result.output
+        assert toml_path.read_text() == (
+            '[worker]\nname = "test"\nhive_version = "0.2.0"\n\n'
+            '[agent]\nmodel = "claude-haiku-4-5"\n'
+        )
+
+    def test_update_without_bump_does_not_write(self, tmp_path):
+        toml_path = tmp_path / "hive.toml"
+        original = '[worker]\nname = "test"\nhive_version = "0.0.1"\n'
+        toml_path.write_text(original)
+        with (
+            patch("hive.shared.changelog.find_changelog_text", return_value=None),
+            patch("hive.__version__", "0.2.0"),
+        ):
+            result = runner.invoke(app, ["update", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert toml_path.read_text() == original
 
 
 class TestBoot:

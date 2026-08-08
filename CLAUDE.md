@@ -158,7 +158,8 @@ Full reference: `docs/cli/README.md`
 | `hive stop <path>` | `supervisorctl stop` |
 | `hive restart <path>` | `supervisorctl restart` |
 | `hive remove <path>` | Unregister and stop a Worker; `--delete` also deletes the folder |
-| `hive upgrade` | Re-apply supervisord/plist config; fixes PATH and nodaemon issues after reboot |
+| `hive repair` | Re-apply supervisord/plist config; fixes PATH and nodaemon issues after reboot |
+| `hive update <path> [--bump]` | Report Hive version drift since the Worker was scaffolded; `--bump` records the installed version as the new baseline. Also surfaced automatically by `start`/`restart`/`status` |
 | `hive auth` | Store agent auth (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) in the global `~/.config/hive/.env`; applies to all Workers, per-Worker `.env` overrides |
 | `hive boot enable/disable/status` | Switch supervisord between boot-time LaunchDaemon (sudo) and login-time LaunchAgent |
 | `hive boot stage` | Write the daemon plist to disk without installing it, for manual sudo install in scripted setups |

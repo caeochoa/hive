@@ -1,6 +1,6 @@
 # Versioning & Changelog Conventions
 
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-08_
 
 ---
 
@@ -33,23 +33,39 @@ _Last updated: 2026-08-04_
   `vX.Y.Z`. `[Unreleased]` should be empty on `main` between PRs — it's a
   within-PR staging area, not a backlog. This keeps `hive_version`
   comparisons and `hive update`'s output accurate as of the latest merge.
+- Any PR that adds or changes a user-visible feature must update
+  `docs/features.md` in that same PR, alongside the `CHANGELOG.md` entry.
+  `docs/features.md` is the capability reference Worker developers scan to
+  learn what Hive can do — it should always describe what's actually
+  shipped on `main`, not lag behind it.
 
 ## For Worker developers
 
 - Every Worker's `hive.toml` records the Hive version it was scaffolded
-  against, in `[worker] hive_version`. Hive never rewrites this after
-  `hive init` — it's a one-time stamp, not something kept in sync
-  automatically.
-- Run `hive update <path>` after upgrading Hive to see what's changed since
-  your Worker was created. This only reports — it never rewrites your
+  against, in `[worker] hive_version`. Hive never rewrites this on its own —
+  it only changes when you run `hive update <path> --bump` (see below).
+- Run `hive update <path>` any time to see what's changed since your Worker
+  was created. By default this only reports — it never rewrites your
   `hive.toml` or any other file. If a change affects you, apply it by hand.
+- `hive update <path> --bump` is the one way `hive update` writes to a
+  Worker: after printing the drift report, it rewrites `hive_version` in
+  `hive.toml` to the installed Hive version, leaving the rest of the file
+  untouched. Use it once you've reviewed the changes and confirmed nothing
+  affects you — it's a manual opt-in, never automatic.
+- You don't have to run `hive update` proactively to notice drift: `hive
+  start`/`hive restart` print a short note if the Worker's `hive_version` is
+  behind, and `hive status` flags every drifted Worker in its output. Both
+  point you at `hive update <path>` for the full changelog excerpt.
 - Workers created before this feature existed have no `hive_version` field;
   `hive update` treats these as an unknown baseline and shows full history
   up to the installed version.
-- `hive update` is unrelated to `hive upgrade`: `upgrade` re-applies process
-  management config (supervisord, LaunchAgent/LaunchDaemon) and never looks
-  at a Worker's `hive.toml`; `update` only reports Hive version drift for a
-  single Worker and never touches process config.
+- `hive update` is unrelated to `hive repair`: `repair` re-applies process
+  management config (supervisord, LaunchAgent/LaunchDaemon) across every
+  registered Worker and never looks at a Worker's `hive.toml`; `update`
+  only reports (and, with `--bump`, records) Hive version drift for a
+  single Worker, and never touches process config. `repair` is something
+  you run rarely — after a Hive upgrade or a reboot leaves Workers not
+  starting; `update` is meant to be a routine, low-friction check.
 - `hive update` may make a single outbound HTTPS request (to fetch
   `CHANGELOG.md` from GitHub) when running from a non-source install that
   doesn't have the file on disk. It never sends any Worker data — only a

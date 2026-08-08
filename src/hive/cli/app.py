@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -115,6 +116,18 @@ def init(name: str = typer.Argument(..., help="Name for the new Worker")) -> Non
     typer.echo("Edit .env to add your TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_ID")
 
 
+def _warn_if_worker_behind(config) -> None:
+    """Print a short note if a Worker's stamped hive_version is behind the installed Hive."""
+    from hive import __version__
+    from hive.shared.changelog import compare_versions
+
+    if compare_versions(config.hive_version, __version__) == "behind":
+        typer.echo(
+            f"Note: '{config.name}' was scaffolded against Hive {config.hive_version}, "
+            f"installed is {__version__}. Run 'hive update {config.worker_dir}' to see what changed."
+        )
+
+
 @app.command()
 def start(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
     """Start a Worker process."""
@@ -150,6 +163,7 @@ def start(path: str = typer.Argument(..., help="Path to Worker folder")) -> None
 
     result = supervisorctl("start", f"worker-{name}")
     typer.echo(result.stdout.strip() if result.stdout else f"Started worker-{name}")
+    _warn_if_worker_behind(config)
 
 
 @app.command()
@@ -184,6 +198,7 @@ def restart(path: str = typer.Argument(..., help="Path to Worker folder")) -> No
 
     result = supervisorctl("restart", f"worker-{config.name}")
     typer.echo(result.stdout.strip() if result.stdout else f"Restarted worker-{config.name}")
+    _warn_if_worker_behind(config)
 
 
 @app.command()
@@ -224,6 +239,10 @@ def remove(
 @app.command()
 def status() -> None:
     """Show status of all Workers."""
+    from hive import __version__
+    from hive.shared.changelog import compare_versions
+    from hive.shared.config import ConfigError, load_worker_config_for_tui
+    from hive.shared.registry import HiveRegistry
     from hive.shared.supervisor import supervisorctl
 
     result = supervisorctl("status")
@@ -231,6 +250,20 @@ def status() -> None:
         typer.echo(result.stdout.strip())
     else:
         typer.echo("No workers running")
+
+    behind = []
+    for entry in HiveRegistry().list_workers():
+        try:
+            config = load_worker_config_for_tui(Path(entry.path))
+        except ConfigError:
+            continue
+        if compare_versions(config.hive_version, __version__) == "behind":
+            behind.append((entry.name, config.hive_version))
+
+    if behind:
+        typer.echo(f"\nWorkers behind installed Hive ({__version__}):")
+        for name, worker_version in behind:
+            typer.echo(f"  ⚠ {name} ({worker_version}) — run 'hive update <path>' for details")
 
 
 @app.command()
@@ -302,7 +335,7 @@ def chat(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
 
 
 @app.command()
-def upgrade() -> None:
+def repair() -> None:
     """Re-apply process management config. Run after upgrading Hive or if workers don't start after reboot."""
     from hive.shared import supervisor
     from hive.shared.registry import HiveRegistry
@@ -315,7 +348,7 @@ def upgrade() -> None:
         write_worker_block,
     )
 
-    typer.echo("Upgrading Hive configuration...")
+    typer.echo("Repairing Hive process-management configuration...")
 
     ensure_supervisord_conf()
     typer.echo("  supervisord.conf: OK")
@@ -360,18 +393,40 @@ def version() -> None:
     typer.echo(__version__)
 
 
+_HIVE_VERSION_LINE_RE = re.compile(r'(?m)^hive_version[ \t]*=[ \t]*"[^"]*"[ \t]*$')
+
+
+def _bump_worker_hive_version(worker_dir: Path, new_version: str) -> None:
+    """Rewrite (or insert) the `hive_version` field in a Worker's hive.toml in place."""
+    toml_path = worker_dir / "hive.toml"
+    text = toml_path.read_text()
+    new_line = f'hive_version = "{new_version}"'
+    if _HIVE_VERSION_LINE_RE.search(text):
+        text = _HIVE_VERSION_LINE_RE.sub(new_line, text, count=1)
+    else:
+        text = re.sub(r"(?m)^\[worker\]\s*$", f"[worker]\n{new_line}", text, count=1)
+    toml_path.write_text(text)
+
+
 @app.command()
-def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> None:
+def update(
+    path: str = typer.Argument(..., help="Path to Worker folder"),
+    bump: bool = typer.Option(
+        False,
+        "--bump",
+        help="After reviewing the drift, record the installed Hive version as this Worker's new baseline",
+    ),
+) -> None:
     """Report what's changed in Hive since this Worker was scaffolded.
 
-    Read-only — never modifies the Worker. Unrelated to `hive upgrade`, which
+    Only writes to the Worker when `--bump` is passed (updates hive_version in
+    hive.toml); otherwise read-only. Unrelated to `hive repair`, which
     re-applies process manager (supervisord/LaunchAgent) configuration.
     """
-    from packaging.version import InvalidVersion, Version
-
     from hive import __version__
     from hive.shared.changelog import (
         GITHUB_CHANGELOG_URL,
+        compare_versions,
         entries_between,
         find_changelog_text,
         parse_changelog,
@@ -389,6 +444,7 @@ def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> Non
     worker_version = config.hive_version
     typer.echo(f"Installed Hive version: {__version__}")
 
+    drift = compare_versions(worker_version, __version__)
     if worker_version is None:
         typer.echo(
             f"Worker '{config.name}' has no recorded hive_version "
@@ -396,44 +452,40 @@ def update(path: str = typer.Argument(..., help="Path to Worker folder")) -> Non
         )
     else:
         typer.echo(f"Worker '{config.name}' scaffolded against: {worker_version}")
-        try:
-            worker_v = Version(worker_version)
-            installed_v = Version(__version__)
-        except InvalidVersion:
-            worker_v = installed_v = None
+        if drift == "match":
+            typer.echo("Worker is up to date with the installed Hive version.")
+        elif drift == "ahead":
+            typer.echo(
+                "Worker's recorded hive_version is newer than the installed Hive "
+                "(unusual — was it edited manually, or did you downgrade Hive?)."
+            )
+        elif drift == "behind":
+            typer.echo("Worker is behind the installed Hive version.")
+        else:
             typer.echo(
                 f"Warning: could not compare '{worker_version}' and '{__version__}' as versions "
                 "— skipping drift check.",
                 err=True,
             )
 
-        if worker_v is not None and installed_v is not None:
-            if worker_v == installed_v:
-                typer.echo("Worker is up to date with the installed Hive version.")
-            elif worker_v > installed_v:
-                typer.echo(
-                    "Worker's recorded hive_version is newer than the installed Hive "
-                    "(unusual — was it edited manually, or did you downgrade Hive?)."
-                )
-            else:
-                typer.echo("Worker is behind the installed Hive version.")
-
     changelog_text = find_changelog_text()
     if changelog_text is None:
         typer.echo(f"\nCHANGELOG.md not available locally — see {GITHUB_CHANGELOG_URL}")
-        return
+    else:
+        relevant = entries_between(parse_changelog(changelog_text), worker_version, __version__)
+        if not relevant:
+            typer.echo("\nNo recorded changes between these versions.")
+        else:
+            typer.echo("\nChanges since this Worker was scaffolded:\n")
+            for entry in relevant:
+                header = f"## [{entry.version}]" + (f" - {entry.date}" if entry.date else "")
+                typer.echo(header)
+                typer.echo(entry.body)
+                typer.echo("")
 
-    relevant = entries_between(parse_changelog(changelog_text), worker_version, __version__)
-    if not relevant:
-        typer.echo("\nNo recorded changes between these versions.")
-        return
-
-    typer.echo("\nChanges since this Worker was scaffolded:\n")
-    for entry in relevant:
-        header = f"## [{entry.version}]" + (f" - {entry.date}" if entry.date else "")
-        typer.echo(header)
-        typer.echo(entry.body)
-        typer.echo("")
+    if bump:
+        _bump_worker_hive_version(worker_dir, __version__)
+        typer.echo(f"\nRecorded hive_version = \"{__version__}\" in {worker_dir / 'hive.toml'}.")
 
 
 def _upsert_env_var(path: Path, key: str, value: str) -> None:
@@ -620,7 +672,7 @@ def boot_disable() -> None:
         )
         typer.echo(f"  sudo launchctl bootout system/{supervisor.LAUNCHD_LABEL}")
         typer.echo(f"  sudo rm -f {supervisor.LAUNCHDAEMON_PLIST}")
-        typer.echo("  hive upgrade   # reinstalls the login LaunchAgent")
+        typer.echo("  hive repair   # reinstalls the login LaunchAgent")
         raise typer.Exit(code=1)
 
     uninstall_launchdaemon(_run_sudo)
@@ -655,7 +707,7 @@ def boot_status() -> None:
     elif is_launchagent_installed():
         typer.echo(f"Mode: agent (starts at login) — {supervisor.LAUNCHAGENT_PLIST}")
     else:
-        typer.echo("Not installed. Run 'hive init <name>' or 'hive upgrade' first.")
+        typer.echo("Not installed. Run 'hive init <name>' or 'hive repair' first.")
 
 
 comb_app = typer.Typer(help="Manage the Comb dashboard server.")

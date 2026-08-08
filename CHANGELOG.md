@@ -6,6 +6,24 @@ See `docs/reference/versioning.md` for when to add an entry.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-08
+
+### Changed
+
+- **Breaking:** `hive upgrade` renamed to `hive repair`. Same behavior
+  (re-applies supervisord/LaunchAgent/LaunchDaemon configuration) — only the
+  command name changed.
+
+### Added
+
+- `hive update <path> --bump` — after reviewing the changelog drift, records
+  the installed Hive version as the Worker's new `hive_version` baseline.
+  This is the one case where `hive update` writes to a Worker's files;
+  without `--bump` it remains read-only.
+- `hive start`, `hive restart`, and `hive status` now surface `hive_version`
+  drift automatically, pointing at `hive update <path>` for details — no
+  need to remember to check manually.
+
 ## [0.2.0] - 2026-08-04
 
 ### Added
